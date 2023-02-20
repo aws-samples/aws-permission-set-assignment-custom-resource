@@ -1,0 +1,81 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Permission set assignment
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Principals
+        Parameters:
+          - GroupNames
+          - UserNames
+      - Label:
+          default: Targets
+        Parameters:
+          - TargetOrganizationalUnitNames
+          - TargetAccountIds
+      - Label:
+          default: Permission Sets
+        Parameters:
+          - PermissionSetNames
+      - Label:
+          default: Other
+        Parameters:
+          - ForceUpdate
+    ParameterLabels:
+      PermissionSetNames:
+        default: Permission set names
+      GroupNames:
+        default: Group names
+      UserNames:
+        default: User names
+      TargetOrganizationalUnitNames:
+        default: Organizational unit names
+      TargetAccountIds:
+        default: Account ids
+Parameters:
+  PermissionSetNames:
+    Type: CommaDelimitedList
+    Description: A comma delimited list of permission set names
+  GroupNames:
+    Type: CommaDelimitedList
+    Description: A comma delimited list of identity store group names to apply the permission set to
+  UserNames:
+    Type: CommaDelimitedList
+    Description: A comma delimited list of user names to apply the permission set to
+    Default: ""
+  TargetOrganizationalUnitNames:
+    Type: CommaDelimitedList
+    Description: A comma delimited list of organizational unit names or ids. Nested OUs with non-unique names should be specified using either dot notation (A.B.C) or the OU id directly. You can also a special OU name 'root' or the root id (r-*) to refer to the root organizational unit. The permission sets will be applied to the specified principals for all accounts in the organizational unit.
+  TargetAccountIds:
+    Type: CommaDelimitedList
+    Description: A comma delimited list of account ids. The permission sets will be applied to the specified principals for all account ids.
+    Default: ""
+  ForceUpdate:
+    Type: CommaDelimitedList
+    Description: Used by the solution to force a rerun of the Cloudformation stack on receipt of Control Tower lifecycle events. Any value which is unique compared to the previous run will work.
+    Default: ""
+Conditions:
+  # In order to check if any values were included in the template parameter,
+  # the parameter is joined. When no values were included, the join operation
+  # will result in an empty string. Using the `Fn::Not` condition function
+  # along with `Fn::Equals` creates a condition that is FALSE when the
+  # parameter is left blank, and TRUE when it contains at least one item.
+  HasPermissionSetNames: !Not [!Equals [!Join ['', !Ref PermissionSetNames], '']]
+  HasGroupNames: !Not [!Equals [!Join ['', !Ref GroupNames], '']]
+  HasUserNames: !Not [!Equals [!Join ['', !Ref UserNames], '']]
+  HasTargetOrganizationalUnitNames: !Not [!Equals [!Join ['', !Ref TargetOrganizationalUnitNames], '']]
+  HasTargetAccountIds: !Not [!Equals [!Join ['', !Ref TargetAccountIds], '']]
+
+
+
+Resources:
+  PermissionSetAssignment:
+    Type: AWS::CloudFormation::CustomResource
+    Properties:
+      ServiceToken: '{{resolve:ssm:/cfn/custom/PermissionSetAssignmentProvider/ServiceToken}}'
+      PermissionSetNames: !If [HasPermissionSetNames, !Ref PermissionSetNames, !Ref 'AWS::NoValue']
+      GroupNames: !If [HasGroupNames, !Ref GroupNames, !Ref 'AWS::NoValue']
+      UserNames:  !If [HasUserNames, !Ref UserNames, !Ref 'AWS::NoValue']
+      TargetOrganizationalUnitNames: !If [HasTargetOrganizationalUnitNames, !Ref TargetOrganizationalUnitNames, !Ref 'AWS::NoValue']
+      TargetAccountIds: !If [HasTargetAccountIds, !Ref TargetAccountIds, !Ref 'AWS::NoValue']
+      ForceUpdate: !Ref ForceUpdate
