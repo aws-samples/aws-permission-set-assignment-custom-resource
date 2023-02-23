@@ -656,13 +656,14 @@ export class Aws {
           S: targetOperation.target.Name!,
         },
       };
+      const expression = `${targetOperation.type == AssignmentPayloadType.CREATE ? 'ADD' : 'DELETE'} stackIds :stackId SET target_arn=:target_arn,\
+       target_name=:target_name`;
       statements.push({
 
         Update: {
           Key: key,
           TableName: this.tableName,
-          UpdateExpression: `${targetOperation.type == AssignmentPayloadType.CREATE ? 'ADD' : 'REMOVE'} 
-          stackIds :stackId SET target_arn=:target_arn, target_name=:target_name`,
+          UpdateExpression: expression,
           ExpressionAttributeValues: expressionAttributeValues,
         },
       });

@@ -307,7 +307,7 @@ export class PermissionSetAssignment extends Construct {
     const deleteAccountAssignmentStateMachine = this.buildDeleteAccountAssignmentStateMachine();
     const start = new Pass(this, 'start', {});
     const map = new Map(this, 'map', {
-      maxConcurrency: 10,
+      maxConcurrency: 2,
       itemsPath: '$.inputs',
     });
     start.next(map);

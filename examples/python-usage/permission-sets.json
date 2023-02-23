@@ -1,0 +1,67 @@
+{
+  "permissionSets": [
+    {
+      "Id": "ps1",
+      "Name": "ps1",
+      "Description" : "This is a test1 team permission set.",
+      "InlinePolicy" :
+      {
+        "Version":"2012-10-17",
+        "Statement":[
+          {
+            "Effect":"Allow",
+            "Action":"s3:List*",
+            "Resource":"*"
+          }
+        ]
+      },
+      "ManagedPolicies" : [
+        "arn:aws:iam::aws:policy/AdministratorAccess",
+        "arn:aws:iam::aws:policy/ReadOnlyAccess"
+      ],
+      "SessionDuration" : "PT8H"
+    },
+    {
+      "Id": "ps2",
+      "Name": "ps2",
+      "Description" : "This is a test2 team permission set.",
+      "InlinePolicy" :
+      {
+        "Version":"2012-10-17",
+        "Statement":[
+          {
+            "Effect":"Allow",
+            "Action":"s3:Describe*",
+            "Resource":"*"
+          }
+        ]
+      },
+      "ManagedPolicies" : [
+        "arn:aws:iam::aws:policy/AdministratorAccess",
+        "arn:aws:iam::aws:policy/ReadOnlyAccess"
+      ],
+      "SessionDuration" : "PT8H"
+    },
+    {
+      "Id": "ps3",
+      "Name": "ps3",
+      "Description" : "This is a test3 team permission set.",
+      "InlinePolicy" :
+      {
+        "Version":"2012-10-17",
+        "Statement":[
+          {
+            "Effect":"Allow",
+            "Action":"s3:Delete*",
+            "Resource":"*"
+          }
+        ]
+      },
+      "ManagedPolicies" : [
+        "arn:aws:iam::aws:policy/AdministratorAccess",
+        "arn:aws:iam::aws:policy/ReadOnlyAccess"
+      ],
+      "SessionDuration" : "PT8H"
+    }
+  ]
+}

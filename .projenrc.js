@@ -40,7 +40,7 @@ const project = new awscdk.AwsCdkTypeScriptApp({
   devDeps: ['eslint-plugin-jest', '@types/aws-lambda', 'aws-sdk-client-mock'],
   appEntrypoint: 'infrastructure.ts',
   packageManager: NodePackageManager.NPM,
-  gitignore: ['.idea/', '*.bkp', '*.dtmp', 'repolinter.results.txt', '*.output*', '*_report_result.txt'],
+  gitignore: ['.idea/', '*.bkp', '*.dtmp', 'repolinter.results.txt', '*.output*', '*_report_result.txt', 'examples/python-usage/.venv', 'examples/python-usage/node_modules', 'examples/python-usage/dist', 'examples/python-usage/cdk.out', 'examples/python-usage/.pytest_cache'],
   jestOptions: {
     jestConfig: {
       setupFiles: ['./.jest/setEnvVars.js'],
