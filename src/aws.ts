@@ -361,6 +361,7 @@ export class Aws {
     const response = await this.sfnClient.send(new DescribeExecutionCommand({
       executionArn: executionArn,
     }));
+    logger.debug(`getAccountAssignmentsExecutionStatus = ${JSON.stringify(response)}`);
     return {
       status: response.status,
       error: response.error,

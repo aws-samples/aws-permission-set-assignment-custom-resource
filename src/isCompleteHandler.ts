@@ -17,7 +17,6 @@
  */
 
 import { Logger } from '@aws-lambda-powertools/logger';
-import { ExecutionStatus } from '@aws-sdk/client-sfn';
 import { Callback, CdkCustomResourceEvent, CdkCustomResourceResponse, Context } from 'aws-lambda';
 import { CdkCustomResourceIsCompleteResponse } from 'aws-lambda/trigger/cdk-custom-resource';
 import { Aws } from './aws';
@@ -42,7 +41,7 @@ export const isComplete = async (event: CdkCustomResourceEvent,
     const executionArn = await aws.getExecutionArnFromPhysicalResourceId(physicalResourceId);
     const status: AccountAssignmentsExecutionStatus = await aws.getAccountAssignmentsExecutionStatus(executionArn);
     logger.info(`Status: ${status.status}`);
-    if (status.status == ExecutionStatus.SUCCEEDED) {
+    if (status.status == 'SUCCEEDED') {
       if (requestType == 'Delete') {
         //delete the physical resource id from the table
         await aws.deleteExecutionRecord(physicalResourceId);
@@ -50,9 +49,14 @@ export const isComplete = async (event: CdkCustomResourceEvent,
       response = {
         IsComplete: true,
       };
-    } else if (status.status == ExecutionStatus.ABORTED || status.status == ExecutionStatus.FAILED || status.status == ExecutionStatus.TIMED_OUT) {
+    } else if (status.status == 'ABORTED' || status.status == 'FAILED' || status.status == 'TIMED_OUT') {
 
-      throw new Error(`${status.status} : ${status.error} - ${status.cause}`);
+
+      logger.error(`${status.status} : ${status.error} - ${status.cause}`);
+      response = {
+        IsComplete: true,
+      };
+
     } else {
       response = {
         IsComplete: false,

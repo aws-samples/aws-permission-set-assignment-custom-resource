@@ -122,6 +122,8 @@ export const onEvent = async (event: CdkCustomResourceEvent,
     const error = e as Error;
     logger.error(`${error.name} - ${error.message}`);
     response = {
+      PhysicalResourceId: physicalResourceId,
+      RequestType: event.RequestType,
       IsComplete: true,
       Data: {
         error: error,
