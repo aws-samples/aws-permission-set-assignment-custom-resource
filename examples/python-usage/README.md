@@ -14,7 +14,7 @@ This project is an example of using the PermissionSetAssignment custom resource 
 * Install node dependencies
   
   ```npm install```
-* 
+
 * Install python dependencies
 
   ```poetry install```
