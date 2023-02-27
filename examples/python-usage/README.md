@@ -11,9 +11,13 @@ This project is an example of using the PermissionSetAssignment custom resource 
 
 ## Deployment
 
-* Install dependencies
+* Install node dependencies
   
   ```npm install```
+* 
+* Install python dependencies
+
+  ```poetry install```
 
 * Build the project
   
