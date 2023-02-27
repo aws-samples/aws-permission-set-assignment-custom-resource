@@ -25,7 +25,7 @@
     },
     {
       "name": "aws-cdk",
-      "version": "^2.64.0",
+      "version": "^2.66.1",
       "type": "build"
     },
     {
@@ -64,10 +64,6 @@
     {
       "name": "jest-junit",
       "version": "^13",
-      "type": "build"
-    },
-    {
-      "name": "json-schema",
       "type": "build"
     },
     {
@@ -138,7 +134,7 @@
     },
     {
       "name": "aws-cdk-lib",
-      "version": "^2.64.0",
+      "version": "^2.66.1",
       "type": "runtime"
     },
     {

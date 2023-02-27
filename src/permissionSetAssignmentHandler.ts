@@ -112,15 +112,18 @@ export const onEvent = async (event: CdkCustomResourceEvent,
     await aws.putExecutionRecord(physicalResourceId, executionArn);
     await aws.associateTargetsToStack(event.StackId, targets);
 
-    let result: CdkCustomResourceResponse = {
+    response = {
       PhysicalResourceId: physicalResourceId,
       IsComplete: false,
       RequestType: event.RequestType,
     };
-    return result;
+
   } catch (e) {
     const error = e as Error;
+    logger.error(`${error.name} - ${error.message}`);
     response = {
+      PhysicalResourceId: physicalResourceId,
+      RequestType: event.RequestType,
       IsComplete: true,
       Data: {
         error: error,

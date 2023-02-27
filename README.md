@@ -7,6 +7,7 @@ with AWS users and groups to accounts and [organizational units (OUs)](https://d
 
 ## Prerequisites
 
+* Install [NodeJS](https://nodejs.org/en/download/)
 * [AWS Organization](https://docs.aws.amazon.com/organizations/latest/userguide/orgs_introduction.html)
 * [AWS Control Tower](https://docs.aws.amazon.com/controltower/latest/userguide/what-is-control-tower.html)
 * [AWS IAM Identity Center](https://docs.aws.amazon.com/singlesignon/latest/userguide/what-is.html)
@@ -117,3 +118,7 @@ See [CONTRIBUTING](CONTRIBUTING.md#security-issue-notifications) for more inform
 ## License
 
 This library is licensed under the MIT-0 License. See the LICENSE file.
+
+## Examples 
+
+[python-usage](./examples/python-usage)

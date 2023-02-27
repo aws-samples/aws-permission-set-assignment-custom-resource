@@ -1,0 +1,39 @@
+{
+  "permissionSetAssignments": [
+    {
+      "Id": "psa1",
+      "Description": "This is a test1 team permission set assignment.",
+      "GroupNames": [
+        "TestGroup01",
+        "TestGroup02"
+      ],
+      "UserNames": null,
+      "OrganizationalUnits": [
+        "Sandbox",
+        "Security"
+      ],
+      "AccountIds": null,
+      "PermissionSets": [
+        "ps1",
+        "ps3"
+      ]
+    },
+    {
+      "Id": "psa2",
+      "Description": "This is a test2 team permission set assignment.",
+      "GroupNames": [
+        "TestGroup03"
+      ],
+      "UserNames": null,
+      "OrganizationalUnits": [
+        "Sandbox",
+        "Infrastructure"
+      ],
+      "AccountIds": null,
+      "PermissionSets": [
+        "ps2",
+        "ps3"
+      ]
+    }
+  ]
+}

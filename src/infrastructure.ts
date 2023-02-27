@@ -307,7 +307,7 @@ export class PermissionSetAssignment extends Construct {
     const deleteAccountAssignmentStateMachine = this.buildDeleteAccountAssignmentStateMachine();
     const start = new Pass(this, 'start', {});
     const map = new Map(this, 'map', {
-      maxConcurrency: 10,
+      maxConcurrency: 2,
       itemsPath: '$.inputs',
     });
     start.next(map);
@@ -405,10 +405,9 @@ export class PermissionSetAssignmentCustomResourceStack extends Stack {
       serviceTokenParameter: permissionSetAssignment.serviceTokenParameter,
 
     });
-    const awsSolutionsIAM4Response='I am totally cool with using AWS managed policies';
-    const awsSolutionsIAM5Response='This is a meant to run in the AWS IAM Identity Center delegate account. ' +
-      "At that point if you\'re in this account you can assign yourself permission to almost whatever you want.";
-    const awsSolutionsL1Response='Not my fault, the CDK custom resource team should update their runtime';
+    const awsSolutionsIAM4Response='AWS managed policies acceptable here';
+    const awsSolutionsIAM5Response='This is a meant to run in the AWS IAM Identity Center delegate account.' ;
+    const awsSolutionsL1Response='provider-framework hardcoded with NodeJS 14x https://github.com/aws/aws-cdk/blob/686c72d8f7e347053cb47153c1a98b1bef1a29e3/packages/%40aws-cdk/custom-resources/lib/provider-framework/provider.ts#L210';
     NagSuppressions.addResourceSuppressionsByPath(this,
       '/PermissionSetAssignmentCustomResourceStack/PermissionSetAssignment/createAccountAssignmentStateMachine/Role/DefaultPolicy/Resource',
       [
