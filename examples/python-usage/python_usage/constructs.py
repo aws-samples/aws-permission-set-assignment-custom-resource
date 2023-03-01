@@ -1,5 +1,4 @@
 import json
-import uuid
 
 from aws_cdk import CustomResource
 from aws_cdk.aws_ssm import StringParameter
@@ -9,9 +8,15 @@ from constructs import Construct
 
 class PermissionSetAssignments(Construct):
     def __init__(
-        self, scope: Construct, construct_id: str, config_path: str, **kwargs
+        self,
+        scope: Construct,
+        construct_id: str,
+        config_path: str,
+        force_update: str = "",
+        **kwargs
     ) -> None:
         super().__init__(scope, construct_id, **kwargs)
+
         service_token = StringParameter.value_for_string_parameter(
             self,
             parameter_name="/cfn/custom/PermissionSetAssignmentProvider/ServiceToken",
@@ -67,7 +72,7 @@ class PermissionSetAssignments(Construct):
                         "UserNames": user_names,
                         "TargetOrganizationalUnitNames": organizational_unit_names,
                         "TargetAccountIds": target_account_ids,
-                        "ForceUpdate": "",
+                        "ForceUpdate": force_update,
                     },
                 )
                 if previous_cr != None:
