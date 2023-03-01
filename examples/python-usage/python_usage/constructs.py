@@ -17,6 +17,7 @@ class PermissionSetAssignments(Construct):
 
         with open(config_path) as config_file:
             config = json.load(config_file)
+            previous_cr: CustomResource = None
             for permissionSetAssignmentJson in config["permissionSetAssignments"]:
                 group_names = (
                     permissionSetAssignmentJson["GroupNames"]
@@ -51,7 +52,7 @@ class PermissionSetAssignments(Construct):
                     raise Exception(
                         "You must specify at least one target (either OU or account id) "
                     )
-                CustomResource(
+                cr = CustomResource(
                     self,
                     permissionSetAssignmentJson["Id"],
                     service_token=service_token,
@@ -66,6 +67,10 @@ class PermissionSetAssignments(Construct):
                         "ForceUpdate": None,
                     },
                 )
+                if previous_cr != None:
+                    cr.node.add_dependency(previous_cr)
+                    previous_cr = cr
+                previous_cr = cr
 
 
 class PermissionSets(Construct):

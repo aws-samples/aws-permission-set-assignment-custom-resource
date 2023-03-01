@@ -22,6 +22,7 @@
       "Id": "psa2",
       "Description": "This is a test2 team permission set assignment.",
       "GroupNames": [
+        "TestGroup01",
         "TestGroup03"
       ],
       "UserNames": null,

@@ -30,6 +30,7 @@ jspm_packages/
 *.tgz
 .yarn-integrity
 .cache
+.DS_Store
 .idea/
 *.bkp
 *.dtmp

@@ -17,6 +17,7 @@
  */
 
 import path from 'path';
+import { paginateListInstances, SSOAdminClient } from '@aws-sdk/client-sso-admin';
 import { App, Aspects, Aws as AWS, CfnOutput, Duration, RemovalPolicy, Stack, StackProps } from 'aws-cdk-lib';
 import { AttributeType, BillingMode, Table, TableEncryption } from 'aws-cdk-lib/aws-dynamodb';
 import { EventBus, Rule } from 'aws-cdk-lib/aws-events';
@@ -46,6 +47,8 @@ import { Construct } from 'constructs';
 
 export interface PermissionSetAssignmentConfig {
   table: Table;
+  instanceId: string;
+  managementAccountId: string;
 }
 
 export class PermissionSetAssignment extends Construct {
@@ -54,7 +57,7 @@ export class PermissionSetAssignment extends Construct {
 
   constructor(scope: Construct, id: string, config: PermissionSetAssignmentConfig) {
     super(scope, id);
-    const stateMachine = this.buildStateMachine();
+    const stateMachine = this.buildStateMachine(config.instanceId);
     const table = config.table;
     const permissionSetAssignmentHandler = new NodejsFunction(this, 'permissionSetAssignmentHandler', {
       handler: 'onEvent',
@@ -64,6 +67,7 @@ export class PermissionSetAssignment extends Construct {
       timeout: Duration.seconds(30),
       runtime: Runtime.NODEJS_18_X,
       logRetention: RetentionDays.ONE_DAY,
+      reservedConcurrentExecutions: 1,
       environment: {
         STATE_MACHINE_ARN: stateMachine.stateMachineArn,
         TABLE_NAME: table.tableName,
@@ -80,6 +84,7 @@ export class PermissionSetAssignment extends Construct {
       timeout: Duration.seconds(30),
       runtime: Runtime.NODEJS_18_X,
       logRetention: RetentionDays.ONE_DAY,
+      reservedConcurrentExecutions: 1,
       environment: {
         TABLE_NAME: table.tableName,
         LOG_LEVEL: 'DEBUG',
@@ -97,14 +102,29 @@ export class PermissionSetAssignment extends Construct {
     }));
     permissionSetAssignmentHandler.addToRolePolicy(new PolicyStatement({
       effect: Effect.ALLOW,
-      actions: ['organizations:ListAccounts', 'organizations:ListAccountsForParent', 'organizations:ListOrganizationalUnitsForParent',
-        'organizations:ListRoots', 'organizations:DescribeOrganization', 'organizations:DescribeOrganizationalUnit'],
+      actions: ['organizations:ListAccounts',
+        'organizations:ListRoots', 'organizations:DescribeOrganization'],
       resources: ['*'],
     }));
     permissionSetAssignmentHandler.addToRolePolicy(new PolicyStatement({
       effect: Effect.ALLOW,
-      actions: ['sso:ListInstances', 'sso:ListPermissionSets', 'sso:DescribePermissionSet'],
+      actions: ['organizations:ListAccountsForParent', 'organizations:DescribeOrganizationalUnit', 'organizations:ListOrganizationalUnitsForParent'],
+      resources: [`arn:aws:organizations::${config.managementAccountId}:ou/o-*/ou-*`, `arn:aws:organizations::${config.managementAccountId}:root/o-*/r-*`],
+    }));
+    permissionSetAssignmentHandler.addToRolePolicy(new PolicyStatement({
+      effect: Effect.ALLOW,
+      actions: ['sso:ListInstances'],
       resources: ['*'],
+    }));
+    permissionSetAssignmentHandler.addToRolePolicy(new PolicyStatement({
+      effect: Effect.ALLOW,
+      actions: ['sso:ListPermissionSets'],
+      resources: [`arn:aws:sso:::instance/${config.instanceId}`],
+    }));
+    permissionSetAssignmentHandler.addToRolePolicy(new PolicyStatement({
+      effect: Effect.ALLOW,
+      actions: ['sso:DescribePermissionSet'],
+      resources: [`arn:aws:sso:::instance/${config.instanceId}`, `arn:aws:sso:::permissionSet/${config.instanceId}/*`],
     }));
     permissionSetAssignmentHandler.addToRolePolicy(new PolicyStatement({
       effect: Effect.ALLOW,
@@ -206,11 +226,7 @@ export class PermissionSetAssignment extends Construct {
         level: LogLevel.ALL,
       },
     });
-    stateMachine.addToRolePolicy(new PolicyStatement({
-      effect: Effect.ALLOW,
-      actions: ['sso:DeleteAccountAssignment', 'sso:DescribeAccountAssignmentDeletionStatus', 'organizations:ListRoots'],
-      resources: ['*'],
-    }));
+
 
     return stateMachine;
   }
@@ -294,20 +310,16 @@ export class PermissionSetAssignment extends Construct {
         level: LogLevel.ALL,
       },
     });
-    stateMachine.addToRolePolicy(new PolicyStatement({
-      effect: Effect.ALLOW,
-      actions: ['sso:CreateAccountAssignment', 'sso:DescribeAccountAssignmentCreationStatus', 'organizations:ListRoots'],
-      resources: ['*'],
-    }));
+
     return stateMachine;
   }
 
-  private buildStateMachine(): StateMachine {
+  private buildStateMachine(instanceId:string): StateMachine {
     const createAccountAssignmentStateMachine = this.buildCreateAccountAssignmentStateMachine();
     const deleteAccountAssignmentStateMachine = this.buildDeleteAccountAssignmentStateMachine();
     const start = new Pass(this, 'start', {});
     const map = new Map(this, 'map', {
-      maxConcurrency: 2,
+      maxConcurrency: 5,
       itemsPath: '$.inputs',
     });
     start.next(map);
@@ -370,17 +382,42 @@ export class PermissionSetAssignment extends Construct {
 
     createAccountAssignmentStateMachine.grantRead(stateMachine);
     createAccountAssignmentStateMachine.grantStartExecution(stateMachine);
+    createAccountAssignmentStateMachine.grantStartSyncExecution(stateMachine);
     createAccountAssignmentStateMachine.grantTaskResponse(stateMachine);
+    createAccountAssignmentStateMachine.addToRolePolicy(new PolicyStatement({
+      effect: Effect.ALLOW,
+      actions: ['organizations:ListRoots'],
+      resources: ['*'],
+    }));
+    createAccountAssignmentStateMachine.addToRolePolicy(new PolicyStatement({
+      effect: Effect.ALLOW,
+      actions: ['sso:CreateAccountAssignment', 'sso:DescribeAccountAssignmentCreationStatus'],
+      resources: [`arn:aws:sso:::instance/${instanceId}`, 'arn:aws:sso:::permissionSet/*/*',
+        'arn:aws:sso:::account/*'],
+    }));
+
     deleteAccountAssignmentStateMachine.grantRead(stateMachine);
     deleteAccountAssignmentStateMachine.grantStartExecution(stateMachine);
+    deleteAccountAssignmentStateMachine.grantStartSyncExecution(stateMachine);
     deleteAccountAssignmentStateMachine.grantTaskResponse(stateMachine);
-
+    deleteAccountAssignmentStateMachine.addToRolePolicy(new PolicyStatement({
+      effect: Effect.ALLOW,
+      actions: ['organizations:ListRoots'],
+      resources: ['*'],
+    }));
+    deleteAccountAssignmentStateMachine.addToRolePolicy(new PolicyStatement({
+      effect: Effect.ALLOW,
+      actions: ['sso:DeleteAccountAssignment', 'sso:DescribeAccountAssignmentDeletionStatus'],
+      resources: [`arn:aws:sso:::instance/${instanceId}`, 'arn:aws:sso:::permissionSet/*/*',
+        'arn:aws:sso:::account/*'],
+    }));
     return stateMachine;
   }
 }
 
 export interface PermissionSetAssignmentCustomResourceStackProps extends StackProps {
   managementAccountId: string;
+  instanceId: string;
 }
 
 export class PermissionSetAssignmentCustomResourceStack extends Stack {
@@ -398,6 +435,8 @@ export class PermissionSetAssignmentCustomResourceStack extends Stack {
     });
     const permissionSetAssignment = new PermissionSetAssignment(this, 'PermissionSetAssignment', {
       table: table,
+      instanceId: props.instanceId,
+      managementAccountId: props.managementAccountId,
     });
     new ControlTowerLifeCycleEvent(this, 'ControlTowerLifeCycleEvent', {
       table: table,
@@ -405,114 +444,186 @@ export class PermissionSetAssignmentCustomResourceStack extends Stack {
       serviceTokenParameter: permissionSetAssignment.serviceTokenParameter,
 
     });
-    const awsSolutionsIAM4Response='AWS managed policies acceptable here';
-    const awsSolutionsIAM5Response='This is a meant to run in the AWS IAM Identity Center delegate account.' ;
-    const awsSolutionsL1Response='provider-framework hardcoded with NodeJS 14x https://github.com/aws/aws-cdk/blob/686c72d8f7e347053cb47153c1a98b1bef1a29e3/packages/%40aws-cdk/custom-resources/lib/provider-framework/provider.ts#L210';
+    const awsSolutionsIAM4Response = 'AWS managed policies acceptable here';
+    const awsSolutionsIAM5Response = 'The actions in this policy do not support resource-level permissions and require All resources';
+    const awsSolutionsL1Response = 'provider-framework hardcoded with NodeJS 14x https://github.com/aws/aws-cdk/blob/686c72d8f7e347053cb47153c1a98b1bef1a29e3/packages/%40aws-cdk/custom-resources/lib/provider-framework/provider.ts#L210';
     NagSuppressions.addResourceSuppressionsByPath(this,
       '/PermissionSetAssignmentCustomResourceStack/PermissionSetAssignment/createAccountAssignmentStateMachine/Role/DefaultPolicy/Resource',
       [
-        { id: 'AwsSolutions-IAM5', reason: awsSolutionsIAM5Response },
+        {
+          id: 'AwsSolutions-IAM5',
+          reason: awsSolutionsIAM5Response,
+        },
       ]);
     NagSuppressions.addResourceSuppressionsByPath(this,
       '/PermissionSetAssignmentCustomResourceStack/PermissionSetAssignment/deleteAccountAssignmentStateMachine/Role/DefaultPolicy/Resource',
       [
-        { id: 'AwsSolutions-IAM5', reason: awsSolutionsIAM5Response },
+        {
+          id: 'AwsSolutions-IAM5',
+          reason: awsSolutionsIAM5Response,
+        },
       ]);
     NagSuppressions.addResourceSuppressionsByPath(this,
       '/PermissionSetAssignmentCustomResourceStack/PermissionSetAssignment/assignPermissionSetsStateMachine/Role/DefaultPolicy/Resource',
       [
-        { id: 'AwsSolutions-IAM5', reason: awsSolutionsIAM5Response },
+        {
+          id: 'AwsSolutions-IAM5',
+          reason: awsSolutionsIAM5Response,
+        },
       ]);
     NagSuppressions.addResourceSuppressionsByPath(this,
       '/PermissionSetAssignmentCustomResourceStack/PermissionSetAssignment/permissionSetAssignmentHandler/ServiceRole/DefaultPolicy/Resource',
       [
-        { id: 'AwsSolutions-IAM5', reason: awsSolutionsIAM5Response },
+        {
+          id: 'AwsSolutions-IAM5',
+          reason: awsSolutionsIAM5Response,
+        },
       ]);
     NagSuppressions.addResourceSuppressionsByPath(this,
       '/PermissionSetAssignmentCustomResourceStack/PermissionSetAssignment/permissionSetAssignmentIsCompleteHandler/ServiceRole/DefaultPolicy' +
-      '/Resource',
+            '/Resource',
       [
-        { id: 'AwsSolutions-IAM5', reason: awsSolutionsIAM5Response },
+        {
+          id: 'AwsSolutions-IAM5',
+          reason: awsSolutionsIAM5Response,
+        },
       ]);
     NagSuppressions.addResourceSuppressionsByPath(this,
       '/PermissionSetAssignmentCustomResourceStack/PermissionSetAssignment/permissionSetAssignmentProvider/framework-onEvent/ServiceRole' +
-      '/DefaultPolicy/Resource',
+            '/DefaultPolicy/Resource',
       [
-        { id: 'AwsSolutions-IAM5', reason: awsSolutionsIAM5Response },
+        {
+          id: 'AwsSolutions-IAM5',
+          reason: awsSolutionsIAM5Response,
+        },
       ]);
     NagSuppressions.addResourceSuppressionsByPath(this,
       '/PermissionSetAssignmentCustomResourceStack/PermissionSetAssignment/permissionSetAssignmentProvider/framework-isComplete/ServiceRole' +
-      '/DefaultPolicy/Resource',
+            '/DefaultPolicy/Resource',
       [
-        { id: 'AwsSolutions-IAM5', reason: awsSolutionsIAM5Response },
+        {
+          id: 'AwsSolutions-IAM5',
+          reason: awsSolutionsIAM5Response,
+        },
       ]);
     NagSuppressions.addResourceSuppressionsByPath(this, '/PermissionSetAssignmentCustomResourceStack/PermissionSetAssignment' +
-      '/permissionSetAssignmentProvider/framework-onTimeout/ServiceRole/DefaultPolicy/Resource', [
-      { id: 'AwsSolutions-IAM5', reason: awsSolutionsIAM5Response },
+            '/permissionSetAssignmentProvider/framework-onTimeout/ServiceRole/DefaultPolicy/Resource', [
+      {
+        id: 'AwsSolutions-IAM5',
+        reason: awsSolutionsIAM5Response,
+      },
     ]);
     NagSuppressions.addResourceSuppressionsByPath(this, '/PermissionSetAssignmentCustomResourceStack/PermissionSetAssignment' +
-      '/permissionSetAssignmentProvider/waiter-state-machine/Role/DefaultPolicy/Resource', [
-      { id: 'AwsSolutions-IAM5', reason: awsSolutionsIAM5Response },
+            '/permissionSetAssignmentProvider/waiter-state-machine/Role/DefaultPolicy/Resource', [
+      {
+        id: 'AwsSolutions-IAM5',
+        reason: awsSolutionsIAM5Response,
+      },
     ]);
     NagSuppressions.addResourceSuppressionsByPath(this, '/PermissionSetAssignmentCustomResourceStack' +
-      '/LogRetentionaae0aa3c5b4d4f87b02d85b201efdd8a/ServiceRole/DefaultPolicy/Resource', [
-      { id: 'AwsSolutions-IAM5', reason: awsSolutionsIAM5Response },
+            '/LogRetentionaae0aa3c5b4d4f87b02d85b201efdd8a/ServiceRole/DefaultPolicy/Resource', [
+      {
+        id: 'AwsSolutions-IAM5',
+        reason: awsSolutionsIAM5Response,
+      },
     ]);
     NagSuppressions.addResourceSuppressionsByPath(this, '/PermissionSetAssignmentCustomResourceStack/ControlTowerLifeCycleEvent' +
-      '/onUpdateManagedAccountHandler/ServiceRole/DefaultPolicy/Resource', [
-      { id: 'AwsSolutions-IAM5', reason: awsSolutionsIAM5Response },
+            '/onUpdateManagedAccountHandler/ServiceRole/DefaultPolicy/Resource', [
+      {
+        id: 'AwsSolutions-IAM5',
+        reason: awsSolutionsIAM5Response,
+      },
     ]);
     NagSuppressions.addResourceSuppressionsByPath(this, '/PermissionSetAssignmentCustomResourceStack/ControlTowerLifeCycleEvent' +
-      '/onCreateManagedAccountHandler/ServiceRole/DefaultPolicy/Resource', [
-      { id: 'AwsSolutions-IAM5', reason: awsSolutionsIAM5Response },
+            '/onCreateManagedAccountHandler/ServiceRole/DefaultPolicy/Resource', [
+      {
+        id: 'AwsSolutions-IAM5',
+        reason: awsSolutionsIAM5Response,
+      },
     ]);
     NagSuppressions.addResourceSuppressionsByPath(this, '/PermissionSetAssignmentCustomResourceStack/PermissionSetAssignment' +
-      '/assignPermissionSetsStateMachine/Resource', [
-      { id: 'AwsSolutions-SF1', reason: '"ALL" events is an overkill here' },
+            '/assignPermissionSetsStateMachine/Resource', [
+      {
+        id: 'AwsSolutions-SF1',
+        reason: '"ALL" events is an overkill here',
+      },
     ]);
     NagSuppressions.addResourceSuppressionsByPath(this, '/PermissionSetAssignmentCustomResourceStack/PermissionSetAssignment' +
-      '/permissionSetAssignmentHandler/ServiceRole/Resource', [
-      { id: 'AwsSolutions-IAM4', reason: awsSolutionsIAM4Response },
+            '/permissionSetAssignmentHandler/ServiceRole/Resource', [
+      {
+        id: 'AwsSolutions-IAM4',
+        reason: awsSolutionsIAM4Response,
+      },
     ]);
     NagSuppressions.addResourceSuppressionsByPath(this, '/PermissionSetAssignmentCustomResourceStack/PermissionSetAssignment' +
-      '/permissionSetAssignmentIsCompleteHandler/ServiceRole/Resource', [
-      { id: 'AwsSolutions-IAM4', reason: awsSolutionsIAM4Response },
+            '/permissionSetAssignmentIsCompleteHandler/ServiceRole/Resource', [
+      {
+        id: 'AwsSolutions-IAM4',
+        reason: awsSolutionsIAM4Response,
+      },
     ]);
     NagSuppressions.addResourceSuppressionsByPath(this, '/PermissionSetAssignmentCustomResourceStack/PermissionSetAssignment' +
-      '/permissionSetAssignmentProvider/framework-onEvent/ServiceRole/Resource', [
-      { id: 'AwsSolutions-IAM4', reason: awsSolutionsIAM4Response },
+            '/permissionSetAssignmentProvider/framework-onEvent/ServiceRole/Resource', [
+      {
+        id: 'AwsSolutions-IAM4',
+        reason: awsSolutionsIAM4Response,
+      },
     ]);
     NagSuppressions.addResourceSuppressionsByPath(this, '/PermissionSetAssignmentCustomResourceStack/PermissionSetAssignment' +
-      '/permissionSetAssignmentProvider/framework-isComplete/ServiceRole/Resource', [
-      { id: 'AwsSolutions-IAM4', reason: awsSolutionsIAM4Response },
+            '/permissionSetAssignmentProvider/framework-isComplete/ServiceRole/Resource', [
+      {
+        id: 'AwsSolutions-IAM4',
+        reason: awsSolutionsIAM4Response,
+      },
     ]);
     NagSuppressions.addResourceSuppressionsByPath(this, '/PermissionSetAssignmentCustomResourceStack/PermissionSetAssignment' +
-      '/permissionSetAssignmentProvider/framework-onTimeout/ServiceRole/Resource', [
-      { id: 'AwsSolutions-IAM4', reason: awsSolutionsIAM4Response },
+            '/permissionSetAssignmentProvider/framework-onTimeout/ServiceRole/Resource', [
+      {
+        id: 'AwsSolutions-IAM4',
+        reason: awsSolutionsIAM4Response,
+      },
     ]);
     NagSuppressions.addResourceSuppressionsByPath(this, '/PermissionSetAssignmentCustomResourceStack' +
-      '/LogRetentionaae0aa3c5b4d4f87b02d85b201efdd8a/ServiceRole/Resource', [
-      { id: 'AwsSolutions-IAM4', reason: awsSolutionsIAM4Response },
+            '/LogRetentionaae0aa3c5b4d4f87b02d85b201efdd8a/ServiceRole/Resource', [
+      {
+        id: 'AwsSolutions-IAM4',
+        reason: awsSolutionsIAM4Response,
+      },
     ]);
     NagSuppressions.addResourceSuppressionsByPath(this, '/PermissionSetAssignmentCustomResourceStack/ControlTowerLifeCycleEvent' +
-      '/onUpdateManagedAccountHandler/ServiceRole/Resource', [
-      { id: 'AwsSolutions-IAM4', reason: awsSolutionsIAM4Response },
+            '/onUpdateManagedAccountHandler/ServiceRole/Resource', [
+      {
+        id: 'AwsSolutions-IAM4',
+        reason: awsSolutionsIAM4Response,
+      },
     ]);
     NagSuppressions.addResourceSuppressionsByPath(this, '/PermissionSetAssignmentCustomResourceStack/ControlTowerLifeCycleEvent' +
-      '/onCreateManagedAccountHandler/ServiceRole/Resource', [
-      { id: 'AwsSolutions-IAM4', reason: awsSolutionsIAM4Response },
+            '/onCreateManagedAccountHandler/ServiceRole/Resource', [
+      {
+        id: 'AwsSolutions-IAM4',
+        reason: awsSolutionsIAM4Response,
+      },
     ]);
     NagSuppressions.addResourceSuppressionsByPath(this, '/PermissionSetAssignmentCustomResourceStack/PermissionSetAssignment' +
-      '/permissionSetAssignmentProvider/framework-onEvent/Resource', [
-      { id: 'AwsSolutions-L1', reason: awsSolutionsL1Response },
+            '/permissionSetAssignmentProvider/framework-onEvent/Resource', [
+      {
+        id: 'AwsSolutions-L1',
+        reason: awsSolutionsL1Response,
+      },
     ]);
     NagSuppressions.addResourceSuppressionsByPath(this, '/PermissionSetAssignmentCustomResourceStack/PermissionSetAssignment' +
-      '/permissionSetAssignmentProvider/framework-isComplete/Resource', [
-      { id: 'AwsSolutions-L1', reason: awsSolutionsL1Response },
+            '/permissionSetAssignmentProvider/framework-isComplete/Resource', [
+      {
+        id: 'AwsSolutions-L1',
+        reason: awsSolutionsL1Response,
+      },
     ]);
     NagSuppressions.addResourceSuppressionsByPath(this, '/PermissionSetAssignmentCustomResourceStack/PermissionSetAssignment' +
-      '/permissionSetAssignmentProvider/framework-onTimeout/Resource', [
-      { id: 'AwsSolutions-L1', reason: awsSolutionsL1Response },
+            '/permissionSetAssignmentProvider/framework-onTimeout/Resource', [
+      {
+        id: 'AwsSolutions-L1',
+        reason: awsSolutionsL1Response,
+      },
     ]);
 
 
@@ -685,24 +796,48 @@ const env = {
   account: process.env.CDK_DEFAULT_ACCOUNT,
   region: process.env.CDK_DEFAULT_REGION,
 };
+(async () => {
+  const app = new App();
 
-const app = new App();
+  const managementAccountId = app.node.tryGetContext('managementAccountId');
+  if (managementAccountId != undefined) {
+    let instanceId = app.node.tryGetContext('instanceId');
+    if (instanceId == undefined) {
+      console.log('No IAM Identity Center instance id specified in context, attempting to look up instance id via api');
+      const client = new SSOAdminClient({ region: env.region });
+      const paginator = paginateListInstances({
+        client: client,
+      }, {});
+      for await (const page of paginator) {
+        if (instanceId != undefined) {
+          throw new Error('More than one IAM Identity Center instance found, I\'m not sure which one to choose');
+        }
+        if (page.Instances != undefined && page.Instances.length == 1 && page.Instances[0].InstanceArn != undefined) {
+          instanceId = page.Instances[0].InstanceArn;
+          const split_instance_id=instanceId.split('/');
+          instanceId=split_instance_id[split_instance_id.length-1];
 
-const managementAccountId = app.node.tryGetContext('managementAccountId');
-if (managementAccountId != undefined) {
-  new PermissionSetAssignmentCustomResourceStack(app, 'PermissionSetAssignmentCustomResourceStack', {
-    env: env,
-    managementAccountId: managementAccountId,
+        } else {
+          throw new Error('Could not lookup IAM Identity Center instance');
+        }
+      }
+      console.log(`Found IAM Identity Center instance id: ${instanceId}`);
+    }
+    new PermissionSetAssignmentCustomResourceStack(app, 'PermissionSetAssignmentCustomResourceStack', {
+      env: env,
+      managementAccountId: managementAccountId,
+      instanceId: instanceId,
 
-  });
-}
-const targetEventBusArn = app.node.tryGetContext('targetEventBusArn');
-if (targetEventBusArn != undefined) {
-  new ControlTowerLifeCycleEventSourceRuleStack(app, 'ControlTowerLifeCycleEventSourceRuleStack', {
-    env: env,
-    targetEventBusArn: targetEventBusArn,
-  });
-}
-Aspects.of(app).add(new AwsSolutionsChecks({ reports: true }));
+    });
+  }
+  const targetEventBusArn = app.node.tryGetContext('targetEventBusArn');
+  if (targetEventBusArn != undefined) {
+    new ControlTowerLifeCycleEventSourceRuleStack(app, 'ControlTowerLifeCycleEventSourceRuleStack', {
+      env: env,
+      targetEventBusArn: targetEventBusArn,
+    });
+  }
+  Aspects.of(app).add(new AwsSolutionsChecks({ reports: true }));
 
-app.synth();
+  app.synth();
+})();
