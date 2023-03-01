@@ -680,9 +680,15 @@ export class ControlTowerLifeCycleEvent extends Construct {
       },
 
     });
+    table.grantReadData(onCreateManagedAccountHandler);
     const updateStackPolicy = new PolicyStatement({
       effect: Effect.ALLOW,
       actions: ['cloudformation:UpdateStack', 'cloudformation:DescribeStacks', 'cloudformation:GetTemplate'],
+      resources: ['*'],
+    });
+    const listRootsPolicy=new PolicyStatement({
+      effect: Effect.ALLOW,
+      actions: ['organizations:ListRoots'],
       resources: ['*'],
     });
     const invokeProviderPolicy = new PolicyStatement({
@@ -692,13 +698,14 @@ export class ControlTowerLifeCycleEvent extends Construct {
     });
     props.serviceTokenParameter.grantRead(onUpdateManagedAccountHandler);
     props.serviceTokenParameter.grantRead(onCreateManagedAccountHandler);
-
+    onUpdateManagedAccountHandler.addToRolePolicy(listRootsPolicy);
+    onCreateManagedAccountHandler.addToRolePolicy(listRootsPolicy);
     onUpdateManagedAccountHandler.addToRolePolicy(updateStackPolicy);
     onCreateManagedAccountHandler.addToRolePolicy(updateStackPolicy);
     onUpdateManagedAccountHandler.addToRolePolicy(invokeProviderPolicy);
     onCreateManagedAccountHandler.addToRolePolicy(invokeProviderPolicy);
 
-    table.grantReadData(onCreateManagedAccountHandler);
+
     new Rule(this, 'onControlTowerLifecycleEventCreateManagedAccountSuccess', {
       eventBus: eventBus,
       ruleName: 'onControlTowerLifecycleEventCreateManagedAccountSuccess',

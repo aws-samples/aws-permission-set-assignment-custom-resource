@@ -150,14 +150,16 @@ export class Aws {
               const forceUpdate: Parameter | undefined = updatedParameters.find(value => {
                 return value.ParameterKey == 'ForceUpdate';
               });
+              const uuid=randomUUID();
               if (forceUpdate == undefined) {
-                logger.debug('Parameter \'ForceUpdate\' not found, adding');
+
+                logger.debug(`Parameter \'ForceUpdate\' not found, adding ${uuid}`);
                 updatedParameters.push({
                   ParameterKey: 'ForceUpdate',
-                  ParameterValue: randomUUID(),
+                  ParameterValue: uuid,
                 });
               } else {
-                forceUpdate.ParameterValue = randomUUID();
+                forceUpdate.ParameterValue =uuid;
               }
               const templateBody = await this.cfmClient.send(new GetTemplateCommand({
                 StackName: stackId,

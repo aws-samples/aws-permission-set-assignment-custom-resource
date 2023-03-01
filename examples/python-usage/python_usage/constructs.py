@@ -1,4 +1,6 @@
 import json
+import uuid
+
 from aws_cdk import CustomResource
 from aws_cdk.aws_ssm import StringParameter
 from aws_cdk.aws_sso import CfnPermissionSet
@@ -52,6 +54,7 @@ class PermissionSetAssignments(Construct):
                     raise Exception(
                         "You must specify at least one target (either OU or account id) "
                     )
+
                 cr = CustomResource(
                     self,
                     permissionSetAssignmentJson["Id"],
@@ -64,7 +67,7 @@ class PermissionSetAssignments(Construct):
                         "UserNames": user_names,
                         "TargetOrganizationalUnitNames": organizational_unit_names,
                         "TargetAccountIds": target_account_ids,
-                        "ForceUpdate": None,
+                        "ForceUpdate": "",
                     },
                 )
                 if previous_cr != None:

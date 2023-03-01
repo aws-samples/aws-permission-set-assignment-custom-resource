@@ -35,6 +35,23 @@
         "ps2",
         "ps3"
       ]
+    },
+    {
+      "Id": "psa4",
+      "Description": "This is a test3 team permission set assignment.",
+      "GroupNames": [
+
+        "TestGroup03"
+      ],
+      "UserNames": null,
+      "OrganizationalUnits": [
+        "Sandbox"
+      ],
+      "AccountIds": null,
+      "PermissionSets": [
+
+        "ps4"
+      ]
     }
   ]
 }
