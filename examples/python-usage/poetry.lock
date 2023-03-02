@@ -21,14 +21,14 @@ tests-no-zope = ["cloudpickle", "cloudpickle", "hypothesis", "hypothesis", "mypy
 
 [[package]]
 name = "aws-cdk-asset-awscli-v1"
-version = "2.2.85"
+version = "2.2.88"
 description = "A library that contains the AWS CLI for use in Lambda Layers"
 category = "main"
 optional = false
 python-versions = "~=3.7"
 files = [
-    {file = "aws-cdk.asset-awscli-v1-2.2.85.tar.gz", hash = "sha256:9f38be3f1879d0b15a3e2fa23913c4fe57b6d5043ebf6ef854f273ec6fd45fe2"},
-    {file = "aws_cdk.asset_awscli_v1-2.2.85-py3-none-any.whl", hash = "sha256:aff1cae527ffc9bcce3a9210cfef02a94f87cc2cced861dc0e25740fc8d4fe59"},
+    {file = "aws-cdk.asset-awscli-v1-2.2.88.tar.gz", hash = "sha256:0dc6504f4647a485bf079f75a76f987e2f71c8751b998893638536336b583f3e"},
+    {file = "aws_cdk.asset_awscli_v1-2.2.88-py3-none-any.whl", hash = "sha256:ec1de50e7bbe2e7905c71b37db7e03b215a8e521994b52ea9494f0207fa38ab6"},
 ]
 
 [package.dependencies]
@@ -55,14 +55,14 @@ typeguard = ">=2.13.3,<2.14.0"
 
 [[package]]
 name = "aws-cdk-asset-node-proxy-agent-v5"
-version = "2.0.71"
+version = "2.0.72"
 description = "@aws-cdk/asset-node-proxy-agent-v5"
 category = "main"
 optional = false
 python-versions = "~=3.7"
 files = [
-    {file = "aws-cdk.asset-node-proxy-agent-v5-2.0.71.tar.gz", hash = "sha256:85c1876b1a322cc29b20ca5f4cdf6517b84ddbad0021438151882fe76db89b0c"},
-    {file = "aws_cdk.asset_node_proxy_agent_v5-2.0.71-py3-none-any.whl", hash = "sha256:1d62d2f30185b71ebe4abfade9eb0f9a00e4d42fc585c2578cb5b390b417128a"},
+    {file = "aws-cdk.asset-node-proxy-agent-v5-2.0.72.tar.gz", hash = "sha256:16a8b7dfe0193ee64fcbbc2b76bb7a217006493f4f55ec26d9490766ed575701"},
+    {file = "aws_cdk.asset_node_proxy_agent_v5-2.0.72-py3-none-any.whl", hash = "sha256:be76dbbf3f33bc16b91045973c65239458e27c8d0352b1f315bf9f35c30668fc"},
 ]
 
 [package.dependencies]
@@ -72,39 +72,39 @@ typeguard = ">=2.13.3,<2.14.0"
 
 [[package]]
 name = "aws-cdk-lib"
-version = "2.66.1"
+version = "2.67.0"
 description = "Version 2 of the AWS Cloud Development Kit library"
 category = "main"
 optional = false
 python-versions = "~=3.7"
 files = [
-    {file = "aws-cdk-lib-2.66.1.tar.gz", hash = "sha256:30455076ab78c7841616cc3bf4c707bb2b51678b77a85886b170f21af4a40689"},
-    {file = "aws_cdk_lib-2.66.1-py3-none-any.whl", hash = "sha256:22c690b13204f97cc8f29e62fc630a42ce1bfee5791c2dee947bf1802a31d23c"},
+    {file = "aws-cdk-lib-2.67.0.tar.gz", hash = "sha256:fe07c44051222f9fdf6d24250e8c332f3c067c26459ad68169f9035558bf60fb"},
+    {file = "aws_cdk_lib-2.67.0-py3-none-any.whl", hash = "sha256:6b3638a31a0ab6c5c0000ad28f6373c30752d5a908aafca40082c1cf5df4b206"},
 ]
 
 [package.dependencies]
-"aws-cdk.asset-awscli-v1" = ">=2.2.69,<3.0.0"
+"aws-cdk.asset-awscli-v1" = ">=2.2.85,<3.0.0"
 "aws-cdk.asset-kubectl-v20" = ">=2.1.1,<3.0.0"
-"aws-cdk.asset-node-proxy-agent-v5" = ">=2.0.58,<3.0.0"
+"aws-cdk.asset-node-proxy-agent-v5" = ">=2.0.71,<3.0.0"
 constructs = ">=10.0.0,<11.0.0"
-jsii = ">=1.75.0,<2.0.0"
+jsii = ">=1.76.0,<2.0.0"
 publication = ">=0.0.3"
 typeguard = ">=2.13.3,<2.14.0"
 
 [[package]]
 name = "boto3"
-version = "1.26.81"
+version = "1.26.82"
 description = "The AWS SDK for Python"
 category = "main"
 optional = false
 python-versions = ">= 3.7"
 files = [
-    {file = "boto3-1.26.81-py3-none-any.whl", hash = "sha256:a631ce2d22662f326cdf121967b53c251338e4ae7cdfa166c11a31e94a8b6a60"},
-    {file = "boto3-1.26.81.tar.gz", hash = "sha256:898fa38387e2f5a9136aec6cf9caa0a44ddbf78f1c4aaa33f7b1611ac44b4a4d"},
+    {file = "boto3-1.26.82-py3-none-any.whl", hash = "sha256:f618f2e8a4b9d5cb9f05d3a5628ca2afa4bcd3e8b4b8413d11dea0f4c4480b3c"},
+    {file = "boto3-1.26.82.tar.gz", hash = "sha256:f50c048b4f3223dd57afb6eee1189ef9a472bf0ed9b26ff9db65ec13275c4414"},
 ]
 
 [package.dependencies]
-botocore = ">=1.29.81,<1.30.0"
+botocore = ">=1.29.82,<1.30.0"
 jmespath = ">=0.7.1,<2.0.0"
 s3transfer = ">=0.6.0,<0.7.0"
 
@@ -113,14 +113,14 @@ crt = ["botocore[crt] (>=1.21.0,<2.0a0)"]
 
 [[package]]
 name = "botocore"
-version = "1.29.81"
+version = "1.29.82"
 description = "Low-level, data-driven core of boto 3."
 category = "main"
 optional = false
 python-versions = ">= 3.7"
 files = [
-    {file = "botocore-1.29.81-py3-none-any.whl", hash = "sha256:b0b9f4b784e6e58e52f6756bd28d32240016377659adc04e0a0a12df2a90e3f9"},
-    {file = "botocore-1.29.81.tar.gz", hash = "sha256:b140c865fce64097c54cba37420c27f24b26cdec0fc00ce83ad439d3bdb053e1"},
+    {file = "botocore-1.29.82-py3-none-any.whl", hash = "sha256:b31e86f9b51eced5506a0f6038370fe8c1355000379610def1bb9e91cae9e77e"},
+    {file = "botocore-1.29.82.tar.gz", hash = "sha256:913ca09a184cf4428f05838afc631c4fb93f3b173871b69d66230fd14656a3a1"},
 ]
 
 [package.dependencies]
@@ -150,14 +150,14 @@ typing_extensions = {version = "*", markers = "python_version < \"3.8\""}
 
 [[package]]
 name = "constructs"
-version = "10.1.264"
+version = "10.1.265"
 description = "A programming model for software-defined state"
 category = "main"
 optional = false
 python-versions = "~=3.7"
 files = [
-    {file = "constructs-10.1.264-py3-none-any.whl", hash = "sha256:87bca7218a956137d580edef6e7c3f6416c39db4af1fbf752149c3d821bf0bc6"},
-    {file = "constructs-10.1.264.tar.gz", hash = "sha256:e54cda38e8cb7d7c561be6ee25c91ab6f23a49eaa10bd0b731a038f2ac43e204"},
+    {file = "constructs-10.1.265-py3-none-any.whl", hash = "sha256:90c996f65378456e43b8931e17617f25862cd34d5e509912341e8c2f42cbce77"},
+    {file = "constructs-10.1.265.tar.gz", hash = "sha256:f7c26ae7291d09537c91789f1f004274d5a70f1a90e7bc61af5e362736298c19"},
 ]
 
 [package.dependencies]
