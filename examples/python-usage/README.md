@@ -11,9 +11,7 @@ This project is an example of using the PermissionSetAssignment custom resource 
 
 ## Deployment
 
-* Install node dependencies
-  
-  ```npm install```
+
 
 * Install python dependencies
 
@@ -21,10 +19,10 @@ This project is an example of using the PermissionSetAssignment custom resource 
 
 * Build the project
   
-  ```npm run build```
+  ```npx projen build```
 
 * Deploy to AWS
 
-  ```npm run deploy -- --all```
+  ```npx projen deploy --all```
 
   (You'll need AWS credentials on the terminal for this to run correctly)

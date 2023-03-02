@@ -21,14 +21,14 @@ tests-no-zope = ["cloudpickle", "cloudpickle", "hypothesis", "hypothesis", "mypy
 
 [[package]]
 name = "aws-cdk-asset-awscli-v1"
-version = "2.2.88"
+version = "2.2.89"
 description = "A library that contains the AWS CLI for use in Lambda Layers"
 category = "main"
 optional = false
 python-versions = "~=3.7"
 files = [
-    {file = "aws-cdk.asset-awscli-v1-2.2.88.tar.gz", hash = "sha256:0dc6504f4647a485bf079f75a76f987e2f71c8751b998893638536336b583f3e"},
-    {file = "aws_cdk.asset_awscli_v1-2.2.88-py3-none-any.whl", hash = "sha256:ec1de50e7bbe2e7905c71b37db7e03b215a8e521994b52ea9494f0207fa38ab6"},
+    {file = "aws-cdk.asset-awscli-v1-2.2.89.tar.gz", hash = "sha256:6122877d77e3b745ae69770e656ab94aef3c792c049c15bf24154285e8ed6d53"},
+    {file = "aws_cdk.asset_awscli_v1-2.2.89-py3-none-any.whl", hash = "sha256:f72c3961264ecbbf31d0a59b1afa0f4403cc01239b077520847bee2897fa4e86"},
 ]
 
 [package.dependencies]
@@ -334,4 +334,4 @@ socks = ["PySocks (>=1.5.6,!=1.5.7,<2.0)"]
 [metadata]
 lock-version = "2.0"
   python-versions = "^3.7"
-content-hash = "7bb1610d695517d731d9eb961454ef755e9d20ce35687c05408954982b743431"
+content-hash = "fa822d54bd44157adf263ca648958ea32700edda420b83dd968f1bf3b68f2a54"
