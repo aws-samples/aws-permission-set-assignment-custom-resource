@@ -40,7 +40,9 @@ const project = new awscdk.AwsCdkTypeScriptApp({
   devDeps: ['eslint-plugin-jest', '@types/aws-lambda', 'aws-sdk-client-mock'],
   appEntrypoint: 'infrastructure.ts',
   packageManager: NodePackageManager.NPM,
-  gitignore: ['.DS_Store', '.idea/', '*.bkp', '*.dtmp', 'repolinter.results.txt', '*.output*', '*_report_result.txt', 'examples/python-usage/.venv', 'examples/python-usage/node_modules', 'examples/python-usage/dist', 'examples/python-usage/cdk.out', 'examples/python-usage/.pytest_cache'],
+  gitignore: ['.DS_Store', '.idea/', '*.bkp', '*.dtmp', 'repolinter.results.txt', '*.output*', '*_report_result.txt',
+    'examples/python-usage/.venv', 'examples/python-usage/node_modules', 'examples/python-usage/dist', 'examples/python-usage/cdk.out',
+    'examples/python-usage/.pytest_cache'],
   jestOptions: {
     jestConfig: {
       setupFiles: ['./.jest/setEnvVars.js'],
@@ -54,7 +56,12 @@ const project = new awscdk.AwsCdkTypeScriptApp({
     prettier: false,
   },
   releaseTrigger: ReleaseTrigger.manual(),
-
+  context: {
+    '@aws-cdk/aws-apigateway:usagePlanKeyOrderInsensitiveId': false,
+    '@aws-cdk/aws-cloudfront:defaultSecurityPolicyTLSv1.2_2021': false,
+    '@aws-cdk/aws-rds:lowercaseDbIdentifier': false,
+    '@aws-cdk/core:stackRelativeExports': false,
+  },
   // deps: [],                /* Runtime dependencies of this module. */
   // description: undefined,  /* The description is just a string that helps people understand the purpose of the package. */
   // devDeps: [],             /* Build dependencies for this module. */

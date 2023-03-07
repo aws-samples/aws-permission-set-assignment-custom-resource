@@ -109,7 +109,8 @@ export class PermissionSetAssignment extends Construct {
     permissionSetAssignmentHandler.addToRolePolicy(new PolicyStatement({
       effect: Effect.ALLOW,
       actions: ['organizations:ListAccountsForParent', 'organizations:DescribeOrganizationalUnit', 'organizations:ListOrganizationalUnitsForParent'],
-      resources: [`arn:aws:organizations::${config.managementAccountId}:ou/o-*/ou-*`, `arn:aws:organizations::${config.managementAccountId}:root/o-*/r-*`],
+      resources: [`arn:aws:organizations::${config.managementAccountId}:ou/o-*/ou-*`,
+        `arn:aws:organizations::${config.managementAccountId}:root/o-*/r-*`],
     }));
     permissionSetAssignmentHandler.addToRolePolicy(new PolicyStatement({
       effect: Effect.ALLOW,
@@ -314,7 +315,7 @@ export class PermissionSetAssignment extends Construct {
     return stateMachine;
   }
 
-  private buildStateMachine(instanceId:string): StateMachine {
+  private buildStateMachine(instanceId: string): StateMachine {
     const createAccountAssignmentStateMachine = this.buildCreateAccountAssignmentStateMachine();
     const deleteAccountAssignmentStateMachine = this.buildDeleteAccountAssignmentStateMachine();
     const start = new Pass(this, 'start', {});
@@ -392,7 +393,7 @@ export class PermissionSetAssignment extends Construct {
     createAccountAssignmentStateMachine.addToRolePolicy(new PolicyStatement({
       effect: Effect.ALLOW,
       actions: ['sso:CreateAccountAssignment', 'sso:DescribeAccountAssignmentCreationStatus'],
-      resources: [`arn:aws:sso:::instance/${instanceId}`, 'arn:aws:sso:::permissionSet/*/*',
+      resources: [`arn:aws:sso:::instance/${instanceId}`, `arn:aws:sso:::permissionSet/${instanceId}/*`,
         'arn:aws:sso:::account/*'],
     }));
 
@@ -408,7 +409,7 @@ export class PermissionSetAssignment extends Construct {
     deleteAccountAssignmentStateMachine.addToRolePolicy(new PolicyStatement({
       effect: Effect.ALLOW,
       actions: ['sso:DeleteAccountAssignment', 'sso:DescribeAccountAssignmentDeletionStatus'],
-      resources: [`arn:aws:sso:::instance/${instanceId}`, 'arn:aws:sso:::permissionSet/*/*',
+      resources: [`arn:aws:sso:::instance/${instanceId}`, `arn:aws:sso:::permissionSet/${instanceId}/*`,
         'arn:aws:sso:::account/*'],
     }));
     return stateMachine;
@@ -686,7 +687,7 @@ export class ControlTowerLifeCycleEvent extends Construct {
       actions: ['cloudformation:UpdateStack', 'cloudformation:DescribeStacks', 'cloudformation:GetTemplate'],
       resources: ['*'],
     });
-    const listRootsPolicy=new PolicyStatement({
+    const listRootsPolicy = new PolicyStatement({
       effect: Effect.ALLOW,
       actions: ['organizations:ListRoots'],
       resources: ['*'],
@@ -821,8 +822,8 @@ const env = {
         }
         if (page.Instances != undefined && page.Instances.length == 1 && page.Instances[0].InstanceArn != undefined) {
           instanceId = page.Instances[0].InstanceArn;
-          const split_instance_id=instanceId.split('/');
-          instanceId=split_instance_id[split_instance_id.length-1];
+          const split_instance_id = instanceId.split('/');
+          instanceId = split_instance_id[split_instance_id.length - 1];
 
         } else {
           throw new Error('Could not lookup IAM Identity Center instance');
@@ -847,4 +848,9 @@ const env = {
   Aspects.of(app).add(new AwsSolutionsChecks({ reports: true }));
 
   app.synth();
-})();
+})().then(_value => {
+  console.log('Success');
+}).catch(reason => {
+  console.error(`There was a problem with deployment ${reason}`);
+});;
+
