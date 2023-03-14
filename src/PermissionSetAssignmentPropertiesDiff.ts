@@ -112,34 +112,35 @@ export class PermissionSetAssignmentPropertiesDiff {
     props: PermissionSetAssignmentProperties) => PermissionSetAssignmentProperties): DiffResults {
     const adds: PermissionSetAssignmentProperties[] = [];
     const removes: PermissionSetAssignmentProperties[] = [];
-
-    //@ts-ignore
-    if (this.oldProps[fieldName] != undefined) {
+    if (this.oldProps!=undefined && this.newProps!=undefined) {
       //@ts-ignore
-      if (this.newProps[fieldName] != undefined) {
+      if (this.oldProps[fieldName] != undefined) {
         //@ts-ignore
-        for (const oldValue of this.oldProps[fieldName]) {
+        if (this.newProps[fieldName] != undefined) {
           //@ts-ignore
-          if (this.newProps[fieldName].indexOf(oldValue) == -1) {
-            removes.push(callback([oldValue], this.oldProps));
+          for (const oldValue of this.oldProps[fieldName]) {
+            //@ts-ignore
+            if (this.newProps[fieldName].indexOf(oldValue) == -1) {
+              removes.push(callback([oldValue], this.oldProps));
+            }
           }
+          //@ts-ignore
+          for (const newValue of this.newProps[fieldName]) {
+            //@ts-ignore
+            if (this.oldProps[fieldName].indexOf(newValue) == -1) {
+              adds.push(callback([newValue], this.newProps));
+            }
+          }
+        } else {
+          //@ts-ignore
+          removes.push(callback(this.oldProps[fieldName], this.oldProps));
         }
         //@ts-ignore
-        for (const newValue of this.newProps[fieldName]) {
-          //@ts-ignore
-          if (this.oldProps[fieldName].indexOf(newValue) == -1) {
-            adds.push(callback([newValue], this.newProps));
-          }
-        }
-      } else {
+      } else if (this.newProps[fieldName] != undefined) {
+        //the old props didn't have the field name but the new props do so add them all
         //@ts-ignore
-        removes.push(callback(oldProps[fieldName], this.oldProps));
+        adds.push(callback(this.newProps[fieldName], this.newProps));
       }
-      //@ts-ignore
-    } else if (this.newProps[fieldName] != undefined) {
-      //the old props didn't have the field name but the new props do so add them all
-      //@ts-ignore
-      adds.push(callback(this.newProps[fieldName], this.newProps));
     }
     return {
       adds: adds,

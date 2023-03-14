@@ -52,6 +52,23 @@
 
         "ps4"
       ]
+    },
+    {
+      "Id": "psa5",
+      "Description": "This is a test3 team permission set assignment.",
+      "GroupNames": [
+        "Cloud-Engineering-Wes Deviers",
+        "Cloud-Services-Lee Beard"
+      ],
+      "UserNames": null,
+      "OrganizationalUnits":null,
+      "AccountIds": [
+        "200982613275"
+      ],
+      "PermissionSets": [
+
+        "adminaccess"
+      ]
     }
   ]
 }

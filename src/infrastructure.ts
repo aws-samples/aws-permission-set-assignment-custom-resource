@@ -132,6 +132,11 @@ export class PermissionSetAssignment extends Construct {
       actions: ['identitystore:ListGroups', 'identitystore:ListUsers'],
       resources: ['*'],
     }));
+    permissionSetAssignmentHandler.addToRolePolicy(new PolicyStatement({
+      effect: Effect.ALLOW,
+      actions: ['organizations:DescribeAccount'],
+      resources: ['*'],
+    }));
 
     const permissionSetAssignmentProvider = new Provider(this, 'permissionSetAssignmentProvider', {
       onEventHandler: permissionSetAssignmentHandler,

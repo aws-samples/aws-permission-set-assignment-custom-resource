@@ -69,6 +69,15 @@
         "arn:aws:iam::aws:policy/job-function/Billing"
       ],
       "SessionDuration": "PT8H"
+    },
+    {
+      "Id": "adminaccess",
+      "Name": "adminaccess",
+      "Description" : "Permission set created for admin access",
+      "ManagedPolicies" : [
+        "arn:aws:iam::aws:policy/AdministratorAccess"
+      ],
+      "SessionDuration" : "PT8H"
     }
   ]
 }
