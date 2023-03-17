@@ -453,7 +453,7 @@ export class Aws {
     };
   }
 
-
+  //TODO: We need to check for existing permission set assignments for CREATE and filter them out
   async accountAssignmentCommandInputs(type: AssignmentPayloadType, properties: PermissionSetAssignmentProperties):
   Promise<[AccountAssignmentCommandInput[], TargetOperation[]]> {
     const accountAssignmentInputs = await this.accountAssignmentInputs(properties);
