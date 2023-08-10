@@ -55,10 +55,10 @@
     },
     {
       "Id": "psa5",
-      "Description": "This is a test3 team permission set assignment.",
+      "Description": "This is a test4 team permission set assignment.",
       "GroupNames": [
-        "Cloud-Engineering-Wes Deviers",
-        "Cloud-Services-Lee Beard"
+        "Cloud-Engineering",
+        "Cloud-Services"
       ],
       "UserNames": null,
       "OrganizationalUnits":null,

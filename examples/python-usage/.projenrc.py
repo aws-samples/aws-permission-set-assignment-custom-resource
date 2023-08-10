@@ -4,7 +4,7 @@ from projen.python import PoetryPyprojectOptions
 project = AwsCdkPythonApp(
     author_email="awsgalen@amazon.com",
     author_name="Galen Dunkleberger",
-    cdk_version="2.67.0",
+    cdk_version="2.89.0",
     module_name="python_usage",
     name="python-usage",
     version="0.1.0",

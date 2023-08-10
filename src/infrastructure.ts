@@ -30,7 +30,7 @@ import { ParameterDataType, StringParameter } from 'aws-cdk-lib/aws-ssm';
 import {
   Choice,
   Condition,
-  CustomState,
+  CustomState, DefinitionBody,
   Fail,
   LogLevel,
   Map,
@@ -224,8 +224,8 @@ export class PermissionSetAssignment extends Construct {
       stateMachineName: 'deleteAccountAssignmentStateMachine',
       stateMachineType: StateMachineType.EXPRESS,
       tracingEnabled: true,
-      definition: start,
-      timeout: Duration.minutes(1),
+      definitionBody: DefinitionBody.fromChainable(start),
+      timeout: Duration.minutes(60),
       logs: {
         destination: logGroup,
         includeExecutionData: true,
@@ -308,8 +308,8 @@ export class PermissionSetAssignment extends Construct {
       stateMachineName: 'createAccountAssignmentStateMachine',
       stateMachineType: StateMachineType.EXPRESS,
       tracingEnabled: true,
-      definition: start,
-      timeout: Duration.minutes(1),
+      definitionBody: DefinitionBody.fromChainable(start),
+      timeout: Duration.minutes(60),
       logs: {
         destination: logGroup,
         includeExecutionData: true,
@@ -382,8 +382,8 @@ export class PermissionSetAssignment extends Construct {
       stateMachineName: 'assignPermissionSetsStateMachine',
       stateMachineType: StateMachineType.STANDARD,
       tracingEnabled: true,
-      definition: start,
-      timeout: Duration.seconds(300),
+      definitionBody: DefinitionBody.fromChainable(start),
+      timeout: Duration.hours(6),
     });
 
     createAccountAssignmentStateMachine.grantRead(stateMachine);
