@@ -397,10 +397,16 @@ export class PermissionSetAssignment extends Construct {
     }));
     createAccountAssignmentStateMachine.addToRolePolicy(new PolicyStatement({
       effect: Effect.ALLOW,
-      actions: ['sso:CreateAccountAssignment', 'sso:DescribeAccountAssignmentCreationStatus'],
+      actions: ['sso:CreateAccountAssignment'],
       resources: [`arn:aws:sso:::instance/${instanceId}`, `arn:aws:sso:::permissionSet/${instanceId}/*`,
         'arn:aws:sso:::account/*'],
     }));
+    createAccountAssignmentStateMachine.addToRolePolicy(new PolicyStatement({
+      effect: Effect.ALLOW,
+      actions: ['sso:DescribeAccountAssignmentCreationStatus'],
+      resources: [`arn:aws:sso:::instance/${instanceId}`],
+    }));
+
 
     deleteAccountAssignmentStateMachine.grantRead(stateMachine);
     deleteAccountAssignmentStateMachine.grantStartExecution(stateMachine);

@@ -18,6 +18,7 @@
 
 import { randomUUID } from 'crypto';
 import { Logger } from '@aws-lambda-powertools/logger';
+
 import { Callback, CdkCustomResourceEvent, CdkCustomResourceResponse, Context } from 'aws-lambda';
 import { Aws } from './aws';
 import { AccountAssignmentCommandInput, AssignmentPayloadType, defaultCallback, TargetOperation } from './model';

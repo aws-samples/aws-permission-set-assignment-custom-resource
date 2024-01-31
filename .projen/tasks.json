@@ -295,25 +295,13 @@
           "exec": "npm update npm-check-updates"
         },
         {
-          "exec": "npm-check-updates --dep dev --upgrade --target=minor"
-        },
-        {
-          "exec": "npm-check-updates --dep optional --upgrade --target=minor"
-        },
-        {
-          "exec": "npm-check-updates --dep peer --upgrade --target=minor"
-        },
-        {
-          "exec": "npm-check-updates --dep prod --upgrade --target=minor"
-        },
-        {
-          "exec": "npm-check-updates --dep bundle --upgrade --target=minor"
+          "exec": "npm-check-updates --upgrade --target=minor --peer --dep=dev,peer,prod,optional --filter=@types/aws-lambda,@types/jest,@types/node,@typescript-eslint/eslint-plugin,@typescript-eslint/parser,aws-cdk,aws-sdk-client-mock,esbuild,eslint-import-resolver-node,eslint-import-resolver-typescript,eslint-plugin-import,eslint-plugin-jest,eslint,jest,jest-junit,npm-check-updates,projen,standard-version,ts-jest,ts-node,typescript,@aws-lambda-powertools/logger,@aws-lambda-powertools/metrics,@aws-lambda-powertools/tracer,@aws-sdk/client-cloudformation,@aws-sdk/client-dynamodb,@aws-sdk/client-identitystore,@aws-sdk/client-organizations,@aws-sdk/client-sfn,@aws-sdk/client-sso-admin,@aws-sdk/util-dynamodb,aws-cdk-lib,aws-lambda,cdk-nag,constructs"
         },
         {
           "exec": "npm install"
         },
         {
-          "exec": "npm update"
+          "exec": "npm update @types/aws-lambda @types/jest @types/node @typescript-eslint/eslint-plugin @typescript-eslint/parser aws-cdk aws-sdk-client-mock esbuild eslint-import-resolver-node eslint-import-resolver-typescript eslint-plugin-import eslint-plugin-jest eslint jest jest-junit npm-check-updates projen standard-version ts-jest ts-node typescript @aws-lambda-powertools/logger @aws-lambda-powertools/metrics @aws-lambda-powertools/tracer @aws-sdk/client-cloudformation @aws-sdk/client-dynamodb @aws-sdk/client-identitystore @aws-sdk/client-organizations @aws-sdk/client-sfn @aws-sdk/client-sso-admin @aws-sdk/util-dynamodb aws-cdk-lib aws-lambda cdk-nag constructs"
         },
         {
           "exec": "npx projen"

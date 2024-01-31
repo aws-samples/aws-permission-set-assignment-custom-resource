@@ -150,7 +150,7 @@ export class Aws {
               const forceUpdate: Parameter | undefined = updatedParameters.find(value => {
                 return value.ParameterKey == 'ForceUpdate';
               });
-              const uuid=randomUUID();
+              const uuid = randomUUID();
               if (forceUpdate == undefined) {
 
                 logger.debug(`Parameter \'ForceUpdate\' not found, adding ${uuid}`);
@@ -159,7 +159,7 @@ export class Aws {
                   ParameterValue: uuid,
                 });
               } else {
-                forceUpdate.ParameterValue =uuid;
+                forceUpdate.ParameterValue = uuid;
               }
               const templateBody = await this.cfmClient.send(new GetTemplateCommand({
                 StackName: stackId,
@@ -346,7 +346,7 @@ export class Aws {
   }
 
   async startAccountAssignmentsExecution(stateMachineArn: string, inputs: AccountAssignmentCommandInput[]): Promise<string> {
-
+    logger.debug(`startAccountAssignmentsExecution: stateMachineArn=${stateMachineArn}, inputs=${JSON.stringify(inputs)}`);
     const response = await this.sfnClient.send(new StartExecutionCommand({
       stateMachineArn: stateMachineArn,
       input: JSON.stringify({
@@ -354,7 +354,7 @@ export class Aws {
       }),
     }));
     if (response.executionArn == undefined) {
-      throw new Error('Could not start create account assignment execution');
+      throw new Error('Could not start account assignment execution');
     }
     return response.executionArn;
   }
@@ -456,7 +456,9 @@ export class Aws {
   //TODO: We need to check for existing permission set assignments for CREATE and filter them out
   async accountAssignmentCommandInputs(type: AssignmentPayloadType, properties: PermissionSetAssignmentProperties):
   Promise<[AccountAssignmentCommandInput[], TargetOperation[]]> {
+    logger.debug(`accountAssignmentCommandInputs: ${type}, properties: ${JSON.stringify(properties)}`);
     const accountAssignmentInputs = await this.accountAssignmentInputs(properties);
+    logger.debug(`accountAssignmentInputs: ${JSON.stringify(accountAssignmentInputs)}`);
     const inputs: AccountAssignmentCommandInput[] = [];
     const instanceMetadata = await this.getIdentityStoreInstanceMetadata();
     inputs.push(...this.mapAccountAssignmentCommandInput(type, accountAssignmentInputs.groupIds, PrincipalType.GROUP, instanceMetadata.InstanceArn!,
@@ -497,6 +499,7 @@ export class Aws {
   }
 
   async putExecutionRecord(physicalResourceId: string, executionArn: string): Promise<PutItemCommandOutput> {
+    logger.debug(`putExecutionRecord: physicalResourceId=${physicalResourceId}, executionArn=${executionArn}`);
     const item = {
       pk: physicalResourceId,
       executionArn: executionArn,
@@ -640,6 +643,7 @@ export class Aws {
   }
 
   async associateTargetsToStack(stackId: string, targetOperations: TargetOperation[]): Promise<TransactWriteItemsCommandOutput | undefined> {
+    logger.debug(`associateTargetsToStack: stackId=${stackId}, targetOperations=${JSON.stringify(targetOperations)}`);
     const statements: TransactWriteItem[] = [];
     for (const targetOperation of targetOperations) {
       const key = {
