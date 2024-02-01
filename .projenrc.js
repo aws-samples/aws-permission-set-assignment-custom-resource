@@ -53,7 +53,6 @@ const project = new awscdk.AwsCdkTypeScriptApp({
   license: 'MIT-0',
   copyrightOwner: 'Amazon.com, Inc. or its affiliates. All Rights Reserved.',
   release: true,
-  projenrcTs: true,
   eslintOptions: {
     prettier: true,
     dirs: ['src/runtime'],
