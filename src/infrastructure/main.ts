@@ -30,7 +30,8 @@ import { ParameterDataType, StringParameter } from 'aws-cdk-lib/aws-ssm';
 import {
   Choice,
   Condition,
-  CustomState, DefinitionBody,
+  CustomState,
+  DefinitionBody,
   Fail,
   LogLevel,
   Map,
@@ -44,6 +45,7 @@ import {
 import { Provider } from 'aws-cdk-lib/custom-resources';
 import { AwsSolutionsChecks, NagSuppressions } from 'cdk-nag';
 import { Construct } from 'constructs';
+import { AwsStateMachineWithConcurrencyControls } from './StateMachineWithConcurrencyControls';
 
 export interface PermissionSetAssignmentConfig {
   table: Table;
@@ -59,41 +61,39 @@ export class PermissionSetAssignment extends Construct {
     super(scope, id);
     const stateMachine = this.buildStateMachine(config.instanceId);
     const table = config.table;
+    const eventBus = new EventBus(this, 'EventBus', {
+      eventBusName: 'StateMachineConcurrencyControlsEventBus',
+    });
+    const stateMachineWithConcurrencyControls = new AwsStateMachineWithConcurrencyControls(this, 'StateMachineConcurrencyControls', {
+      concurrencyTable: table,
+      eventBus: eventBus,
+      maxConcurrentExecutions: 1,
+      requeueOnFailure: true,
+      stateMachine: stateMachine,
+    });
     const permissionSetAssignmentHandler = new NodejsFunction(this, 'permissionSetAssignmentHandler', {
+      description: 'permissionSetAssignmentHandler.ts',
       handler: 'onEvent',
       entry: path.join(__dirname, 'permissionSetAssignmentHandler.ts'),
       memorySize: 256,
       architecture: Architecture.ARM_64,
       timeout: Duration.seconds(30),
-      runtime: Runtime.NODEJS_18_X,
+      runtime: Runtime.NODEJS_20_X,
       logRetention: RetentionDays.ONE_DAY,
       reservedConcurrentExecutions: 1,
       environment: {
-        STATE_MACHINE_ARN: stateMachine.stateMachineArn,
+        QUEUE_URL: stateMachineWithConcurrencyControls.queue.queueUrl,
         TABLE_NAME: table.tableName,
         LOG_LEVEL: 'DEBUG',
       },
 
     });
+    stateMachineWithConcurrencyControls.queue.grantSendMessages(permissionSetAssignmentHandler);
     table.grantWriteData(permissionSetAssignmentHandler);
-    const isCompleteHandler = new NodejsFunction(this, 'permissionSetAssignmentIsCompleteHandler', {
-      handler: 'isComplete',
-      entry: path.join(__dirname, 'isCompleteHandler.ts'),
-      memorySize: 256,
-      architecture: Architecture.ARM_64,
-      timeout: Duration.seconds(30),
-      runtime: Runtime.NODEJS_18_X,
-      logRetention: RetentionDays.ONE_DAY,
-      reservedConcurrentExecutions: 1,
-      environment: {
-        TABLE_NAME: table.tableName,
-        LOG_LEVEL: 'DEBUG',
-      },
 
-    });
-    table.grantReadWriteData(isCompleteHandler);
+
     stateMachine.grantStartExecution(permissionSetAssignmentHandler);
-    stateMachine.grantRead(isCompleteHandler);
+
 
     stateMachine.addToRolePolicy(new PolicyStatement({
       effect: Effect.ALLOW,
@@ -141,7 +141,6 @@ export class PermissionSetAssignment extends Construct {
     const permissionSetAssignmentProvider = new Provider(this, 'permissionSetAssignmentProvider', {
       onEventHandler: permissionSetAssignmentHandler,
       logRetention: RetentionDays.ONE_DAY,
-      isCompleteHandler: isCompleteHandler,
       providerFunctionName: 'permissionSetAssignmentProvider',
 
     });
@@ -215,12 +214,12 @@ export class PermissionSetAssignment extends Construct {
     isAccountAssignmentDeletionComplete.when(Condition.stringEquals('$.TaskResult.AccountAssignmentDeletionStatus.Status', 'FAILED'),
       accountAssignmentDeletionFailed);
 
-    const logGroup = new LogGroup(this, 'deleteAccountAssignmentStateMachineLogGroup', {
-      logGroupName: 'deleteAccountAssignmentStateMachine',
+    const logGroup = new LogGroup(this, 'DeleteAccountAssignmentStateMachineLogGroup', {
+      logGroupName: 'DeleteAccountAssignmentStateMachine',
       removalPolicy: RemovalPolicy.DESTROY,
       retention: RetentionDays.THREE_DAYS,
     });
-    const stateMachine = new StateMachine(this, 'deleteAccountAssignmentStateMachine', {
+    return new StateMachine(this, 'deleteAccountAssignmentStateMachine', {
       stateMachineName: 'deleteAccountAssignmentStateMachine',
       stateMachineType: StateMachineType.EXPRESS,
       tracingEnabled: true,
@@ -234,7 +233,6 @@ export class PermissionSetAssignment extends Construct {
     });
 
 
-    return stateMachine;
   }
 
 
@@ -299,8 +297,8 @@ export class PermissionSetAssignment extends Construct {
     isAccountAssignmentCreationComplete.when(Condition.stringEquals('$.TaskResult.Status', 'SUCCEEDED'),
       accountAssignmentCreationSucceeded);
     isAccountAssignmentCreationComplete.when(Condition.stringEquals('$.TaskResult.Status', 'FAILED'), accountAssignmentCreationFailed);
-    const logGroup = new LogGroup(this, 'createAccountAssignmentStateMachineLogGroup', {
-      logGroupName: 'createAccountAssignmentStateMachine',
+    const logGroup = new LogGroup(this, 'CreateAccountAssignmentStateMachineLogGroup', {
+      logGroupName: 'CreateAccountAssignmentStateMachine',
       removalPolicy: RemovalPolicy.DESTROY,
       retention: RetentionDays.THREE_DAYS,
     });
@@ -377,10 +375,16 @@ export class PermissionSetAssignment extends Construct {
     requestTypeChoice.when(Condition.stringEquals('$.type', 'Create'), executeCreateAccountAssignment);
     requestTypeChoice.when(Condition.stringEquals('$.type', 'Delete'), executeDeleteAccountAssignment);
 
-
+    const logGroup = new LogGroup(this, 'AssignPermissionSetsStateMachineLogGroup', {
+      retention: RetentionDays.ONE_MONTH,
+    });
     const stateMachine = new StateMachine(this, 'assignPermissionSetsStateMachine', {
       stateMachineName: 'assignPermissionSetsStateMachine',
       stateMachineType: StateMachineType.STANDARD,
+      logs: {
+        destination: logGroup,
+        level: LogLevel.ALL,
+      },
       tracingEnabled: true,
       definitionBody: DefinitionBody.fromChainable(start),
       timeout: Duration.hours(6),
@@ -423,6 +427,7 @@ export class PermissionSetAssignment extends Construct {
       resources: [`arn:aws:sso:::instance/${instanceId}`, `arn:aws:sso:::permissionSet/${instanceId}/*`,
         'arn:aws:sso:::account/*'],
     }));
+
     return stateMachine;
   }
 }
@@ -454,189 +459,23 @@ export class PermissionSetAssignmentCustomResourceStack extends Stack {
       table: table,
       managementAccountId: props.managementAccountId,
       serviceTokenParameter: permissionSetAssignment.serviceTokenParameter,
-
     });
     const awsSolutionsIAM4Response = 'AWS managed policies acceptable here';
     const awsSolutionsIAM5Response = 'The actions in this policy do not support resource-level permissions and require All resources';
     const awsSolutionsL1Response = 'provider-framework hardcoded with NodeJS 14x https://github.com/aws/aws-cdk/blob/686c72d8f7e347053cb47153c1a98b1bef1a29e3/packages/%40aws-cdk/custom-resources/lib/provider-framework/provider.ts#L210';
-    NagSuppressions.addResourceSuppressionsByPath(this,
-      '/PermissionSetAssignmentCustomResourceStack/PermissionSetAssignment/createAccountAssignmentStateMachine/Role/DefaultPolicy/Resource',
-      [
-        {
-          id: 'AwsSolutions-IAM5',
-          reason: awsSolutionsIAM5Response,
-        },
-      ]);
-    NagSuppressions.addResourceSuppressionsByPath(this,
-      '/PermissionSetAssignmentCustomResourceStack/PermissionSetAssignment/deleteAccountAssignmentStateMachine/Role/DefaultPolicy/Resource',
-      [
-        {
-          id: 'AwsSolutions-IAM5',
-          reason: awsSolutionsIAM5Response,
-        },
-      ]);
-    NagSuppressions.addResourceSuppressionsByPath(this,
-      '/PermissionSetAssignmentCustomResourceStack/PermissionSetAssignment/assignPermissionSetsStateMachine/Role/DefaultPolicy/Resource',
-      [
-        {
-          id: 'AwsSolutions-IAM5',
-          reason: awsSolutionsIAM5Response,
-        },
-      ]);
-    NagSuppressions.addResourceSuppressionsByPath(this,
-      '/PermissionSetAssignmentCustomResourceStack/PermissionSetAssignment/permissionSetAssignmentHandler/ServiceRole/DefaultPolicy/Resource',
-      [
-        {
-          id: 'AwsSolutions-IAM5',
-          reason: awsSolutionsIAM5Response,
-        },
-      ]);
-    NagSuppressions.addResourceSuppressionsByPath(this,
-      '/PermissionSetAssignmentCustomResourceStack/PermissionSetAssignment/permissionSetAssignmentIsCompleteHandler/ServiceRole/DefaultPolicy' +
-            '/Resource',
-      [
-        {
-          id: 'AwsSolutions-IAM5',
-          reason: awsSolutionsIAM5Response,
-        },
-      ]);
-    NagSuppressions.addResourceSuppressionsByPath(this,
-      '/PermissionSetAssignmentCustomResourceStack/PermissionSetAssignment/permissionSetAssignmentProvider/framework-onEvent/ServiceRole' +
-            '/DefaultPolicy/Resource',
-      [
-        {
-          id: 'AwsSolutions-IAM5',
-          reason: awsSolutionsIAM5Response,
-        },
-      ]);
-    NagSuppressions.addResourceSuppressionsByPath(this,
-      '/PermissionSetAssignmentCustomResourceStack/PermissionSetAssignment/permissionSetAssignmentProvider/framework-isComplete/ServiceRole' +
-            '/DefaultPolicy/Resource',
-      [
-        {
-          id: 'AwsSolutions-IAM5',
-          reason: awsSolutionsIAM5Response,
-        },
-      ]);
-    NagSuppressions.addResourceSuppressionsByPath(this, '/PermissionSetAssignmentCustomResourceStack/PermissionSetAssignment' +
-            '/permissionSetAssignmentProvider/framework-onTimeout/ServiceRole/DefaultPolicy/Resource', [
-      {
-        id: 'AwsSolutions-IAM5',
-        reason: awsSolutionsIAM5Response,
-      },
-    ]);
-    NagSuppressions.addResourceSuppressionsByPath(this, '/PermissionSetAssignmentCustomResourceStack/PermissionSetAssignment' +
-            '/permissionSetAssignmentProvider/waiter-state-machine/Role/DefaultPolicy/Resource', [
-      {
-        id: 'AwsSolutions-IAM5',
-        reason: awsSolutionsIAM5Response,
-      },
-    ]);
-    NagSuppressions.addResourceSuppressionsByPath(this, '/PermissionSetAssignmentCustomResourceStack' +
-            '/LogRetentionaae0aa3c5b4d4f87b02d85b201efdd8a/ServiceRole/DefaultPolicy/Resource', [
-      {
-        id: 'AwsSolutions-IAM5',
-        reason: awsSolutionsIAM5Response,
-      },
-    ]);
-    NagSuppressions.addResourceSuppressionsByPath(this, '/PermissionSetAssignmentCustomResourceStack/ControlTowerLifeCycleEvent' +
-            '/onUpdateManagedAccountHandler/ServiceRole/DefaultPolicy/Resource', [
-      {
-        id: 'AwsSolutions-IAM5',
-        reason: awsSolutionsIAM5Response,
-      },
-    ]);
-    NagSuppressions.addResourceSuppressionsByPath(this, '/PermissionSetAssignmentCustomResourceStack/ControlTowerLifeCycleEvent' +
-            '/onCreateManagedAccountHandler/ServiceRole/DefaultPolicy/Resource', [
-      {
-        id: 'AwsSolutions-IAM5',
-        reason: awsSolutionsIAM5Response,
-      },
-    ]);
-    NagSuppressions.addResourceSuppressionsByPath(this, '/PermissionSetAssignmentCustomResourceStack/PermissionSetAssignment' +
-            '/assignPermissionSetsStateMachine/Resource', [
-      {
-        id: 'AwsSolutions-SF1',
-        reason: '"ALL" events is an overkill here',
-      },
-    ]);
-    NagSuppressions.addResourceSuppressionsByPath(this, '/PermissionSetAssignmentCustomResourceStack/PermissionSetAssignment' +
-            '/permissionSetAssignmentHandler/ServiceRole/Resource', [
-      {
-        id: 'AwsSolutions-IAM4',
-        reason: awsSolutionsIAM4Response,
-      },
-    ]);
-    NagSuppressions.addResourceSuppressionsByPath(this, '/PermissionSetAssignmentCustomResourceStack/PermissionSetAssignment' +
-            '/permissionSetAssignmentIsCompleteHandler/ServiceRole/Resource', [
-      {
-        id: 'AwsSolutions-IAM4',
-        reason: awsSolutionsIAM4Response,
-      },
-    ]);
-    NagSuppressions.addResourceSuppressionsByPath(this, '/PermissionSetAssignmentCustomResourceStack/PermissionSetAssignment' +
-            '/permissionSetAssignmentProvider/framework-onEvent/ServiceRole/Resource', [
-      {
-        id: 'AwsSolutions-IAM4',
-        reason: awsSolutionsIAM4Response,
-      },
-    ]);
-    NagSuppressions.addResourceSuppressionsByPath(this, '/PermissionSetAssignmentCustomResourceStack/PermissionSetAssignment' +
-            '/permissionSetAssignmentProvider/framework-isComplete/ServiceRole/Resource', [
-      {
-        id: 'AwsSolutions-IAM4',
-        reason: awsSolutionsIAM4Response,
-      },
-    ]);
-    NagSuppressions.addResourceSuppressionsByPath(this, '/PermissionSetAssignmentCustomResourceStack/PermissionSetAssignment' +
-            '/permissionSetAssignmentProvider/framework-onTimeout/ServiceRole/Resource', [
-      {
-        id: 'AwsSolutions-IAM4',
-        reason: awsSolutionsIAM4Response,
-      },
-    ]);
-    NagSuppressions.addResourceSuppressionsByPath(this, '/PermissionSetAssignmentCustomResourceStack' +
-            '/LogRetentionaae0aa3c5b4d4f87b02d85b201efdd8a/ServiceRole/Resource', [
-      {
-        id: 'AwsSolutions-IAM4',
-        reason: awsSolutionsIAM4Response,
-      },
-    ]);
-    NagSuppressions.addResourceSuppressionsByPath(this, '/PermissionSetAssignmentCustomResourceStack/ControlTowerLifeCycleEvent' +
-            '/onUpdateManagedAccountHandler/ServiceRole/Resource', [
-      {
-        id: 'AwsSolutions-IAM4',
-        reason: awsSolutionsIAM4Response,
-      },
-    ]);
-    NagSuppressions.addResourceSuppressionsByPath(this, '/PermissionSetAssignmentCustomResourceStack/ControlTowerLifeCycleEvent' +
-            '/onCreateManagedAccountHandler/ServiceRole/Resource', [
-      {
-        id: 'AwsSolutions-IAM4',
-        reason: awsSolutionsIAM4Response,
-      },
-    ]);
-    NagSuppressions.addResourceSuppressionsByPath(this, '/PermissionSetAssignmentCustomResourceStack/PermissionSetAssignment' +
-            '/permissionSetAssignmentProvider/framework-onEvent/Resource', [
-      {
-        id: 'AwsSolutions-L1',
-        reason: awsSolutionsL1Response,
-      },
-    ]);
-    NagSuppressions.addResourceSuppressionsByPath(this, '/PermissionSetAssignmentCustomResourceStack/PermissionSetAssignment' +
-            '/permissionSetAssignmentProvider/framework-isComplete/Resource', [
-      {
-        id: 'AwsSolutions-L1',
-        reason: awsSolutionsL1Response,
-      },
-    ]);
-    NagSuppressions.addResourceSuppressionsByPath(this, '/PermissionSetAssignmentCustomResourceStack/PermissionSetAssignment' +
-            '/permissionSetAssignmentProvider/framework-onTimeout/Resource', [
-      {
-        id: 'AwsSolutions-L1',
-        reason: awsSolutionsL1Response,
-      },
-    ]);
+    NagSuppressions.addStackSuppressions(this, [{
+      id: 'AwsSolutions-IAM5',
+      reason: awsSolutionsIAM5Response,
+    }, {
+      id: 'AwsSolutions-IAM4',
+      reason: awsSolutionsIAM4Response,
+    }, {
+      id: 'AwsSolutions-L1',
+      reason: awsSolutionsL1Response,
+    }, {
+      id: 'AwsSolutions-SNS2',
+      reason: awsSolutionsL1Response,
+    }]);
 
 
   }
@@ -665,12 +504,13 @@ export class ControlTowerLifeCycleEvent extends Construct {
 
     }));
     const onUpdateManagedAccountHandler = new NodejsFunction(this, 'onUpdateManagedAccountHandler', {
+      description: 'onUpdateManagedAccountHandler.ts',
       handler: 'onUpdateManagedAccount',
       entry: path.join(__dirname, 'controlTowerLifeCycleEventHandler.ts'),
       memorySize: 256,
       architecture: Architecture.ARM_64,
       timeout: Duration.seconds(30),
-      runtime: Runtime.NODEJS_18_X,
+      runtime: Runtime.NODEJS_20_X,
       logRetention: RetentionDays.ONE_DAY,
       environment: {
         TABLE_NAME: table.tableName,
@@ -679,12 +519,13 @@ export class ControlTowerLifeCycleEvent extends Construct {
     });
     table.grantReadData(onUpdateManagedAccountHandler);
     const onCreateManagedAccountHandler = new NodejsFunction(this, 'onCreateManagedAccountHandler', {
+      description: 'onCreateManagedAccountHandler.ts',
       handler: 'onCreateManagedAccount',
       entry: path.join(__dirname, 'controlTowerLifeCycleEventHandler.ts'),
       memorySize: 256,
       architecture: Architecture.ARM_64,
       timeout: Duration.seconds(30),
-      runtime: Runtime.NODEJS_18_X,
+      runtime: Runtime.NODEJS_20_X,
       logRetention: RetentionDays.ONE_DAY,
       environment: {
         TABLE_NAME: table.tableName,
@@ -835,7 +676,7 @@ const env = {
           instanceId = page.Instances[0].InstanceArn;
           const split_instance_id = instanceId.split('/');
           instanceId = split_instance_id[split_instance_id.length - 1];
-
+          break;
         } else {
           throw new Error('Could not lookup IAM Identity Center instance');
         }
@@ -862,6 +703,8 @@ const env = {
 })().then(_value => {
   console.log('Success');
 }).catch(reason => {
-  console.error(`There was a problem with deployment ${reason}`);
-});;
+  const error=reason as Error;
+  console.error(`There was a problem with deployment ${error.name} - ${error.message}: ${error.stack}`);
+});
+;
 

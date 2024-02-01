@@ -56,7 +56,8 @@ import {
   Root,
 } from '@aws-sdk/client-organizations';
 
-import { DescribeExecutionCommand, SFNClient, StartExecutionCommand } from '@aws-sdk/client-sfn';
+import { DescribeExecutionCommand, SFNClient } from '@aws-sdk/client-sfn';
+import { SendMessageCommand, SQSClient } from '@aws-sdk/client-sqs';
 import {
   DescribePermissionSetCommand,
   InstanceMetadata,
@@ -89,6 +90,7 @@ export class Aws {
   private readonly ssoAdminClient: SSOAdminClient;
   private readonly identityStoreClient: IdentitystoreClient;
   private readonly sfnClient: SFNClient;
+  private readonly sqsClient: SQSClient;
   private readonly ddbClient: DynamoDBClient;
   private readonly cfmClient: CloudFormationClient;
   protected accountsByOrganizationalUnit: Map<OrganizationalUnit, Account[]>;
@@ -118,6 +120,7 @@ export class Aws {
     this.sfnClient = new SFNClient(configuration);
     this.ddbClient = kwargs != undefined && 'ddbClient' in kwargs ? kwargs.ddbClient as DynamoDBClient : new DynamoDBClient(configuration);
     this.cfmClient = new CloudFormationClient(configuration);
+    this.sqsClient = new SQSClient(configuration);
   }
 
   //TODO: This needs to be moved to a state machine
@@ -345,18 +348,33 @@ export class Aws {
     return this.permissionSets;
   }
 
-  async startAccountAssignmentsExecution(stateMachineArn: string, inputs: AccountAssignmentCommandInput[]): Promise<string> {
-    logger.debug(`startAccountAssignmentsExecution: stateMachineArn=${stateMachineArn}, inputs=${JSON.stringify(inputs)}`);
-    const response = await this.sfnClient.send(new StartExecutionCommand({
-      stateMachineArn: stateMachineArn,
-      input: JSON.stringify({
-        inputs: inputs,
-      }),
-    }));
-    if (response.executionArn == undefined) {
-      throw new Error('Could not start account assignment execution');
+
+  private chunk<X>(arr: Array<X>, size: number): Array<X>[] {
+    return Array.from({ length: Math.ceil(arr.length / size) }, (_v, i) =>
+      arr.slice(i * size, i * size + size),
+    );
+  }
+
+  async startAccountAssignmentsExecutions(queueUrl: string, inputs: AccountAssignmentCommandInput[]): Promise<void> {
+
+    const chunks = this.chunk(inputs, 100);
+    for (const c of chunks) {
+      await this.startAccountAssignmentsExecution(queueUrl, c);
     }
-    return response.executionArn;
+
+  }
+
+  async startAccountAssignmentsExecution(queueUrl: string, inputs: AccountAssignmentCommandInput[]): Promise<void> {
+
+    logger.debug(`startAccountAssignmentsExecution: queueUrl=${queueUrl}, inputs=${JSON.stringify(inputs)}`);
+    //we use a single message group id b/c we  want all items to be processed in order, there is no grouping
+    await this.sqsClient.send(new SendMessageCommand({
+      QueueUrl: queueUrl,
+      MessageBody: JSON.stringify(inputs),
+      MessageGroupId: 'PermisssionSetAssignmentProvider',
+
+    }));
+
   }
 
   async getAccountAssignmentsExecutionStatus(executionArn: string): Promise<AccountAssignmentsExecutionStatus> {
@@ -498,11 +516,11 @@ export class Aws {
     return results;
   }
 
-  async putExecutionRecord(physicalResourceId: string, executionArn: string): Promise<PutItemCommandOutput> {
-    logger.debug(`putExecutionRecord: physicalResourceId=${physicalResourceId}, executionArn=${executionArn}`);
+  async putExecutionRecord(physicalResourceId: string, executionArns: string[]): Promise<PutItemCommandOutput> {
+    logger.debug(`putExecutionRecord: physicalResourceId=${physicalResourceId}, executionArns=${executionArns}`);
     const item = {
       pk: physicalResourceId,
-      executionArn: executionArn,
+      executionArn: executionArns,
     };
     return this.ddbClient.send(new PutItemCommand({
       TableName: this.tableName,
@@ -717,7 +735,7 @@ export class Aws {
     }));
   }
 
-  async getExecutionArnFromPhysicalResourceId(physicalResourceId: string): Promise<string> {
+  async getExecutionArnFromPhysicalResourceId(physicalResourceId: string): Promise<string[]> {
     const key = {
       pk: physicalResourceId,
 
@@ -727,7 +745,12 @@ export class Aws {
       Key: marshall(key),
     }));
     if (response.Item != undefined) {
-      return unmarshall(response.Item).executionArn;
+      const executionArn = unmarshall(response.Item).executionArn;
+      if (Array.isArray(executionArn)) {
+        return executionArn;
+      } else {
+        return [executionArn];
+      }
     } else {
       throw new Error(`Could not find execution arn for physical resource id: ${physicalResourceId} `);
     }

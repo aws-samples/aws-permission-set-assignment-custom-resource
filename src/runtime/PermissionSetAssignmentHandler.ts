@@ -109,8 +109,8 @@ export const onEvent = async (event: CdkCustomResourceEvent,
   let response: CdkCustomResourceResponse;
   try {
 
-    const executionArn = await aws.startAccountAssignmentsExecution(process.env.STATE_MACHINE_ARN!, inputs);
-    await aws.putExecutionRecord(physicalResourceId, executionArn);
+    await aws.startAccountAssignmentsExecutions(process.env.QUEUE_URL!, inputs);
+
     await aws.associateTargetsToStack(event.StackId, targets);
 
     response = {
