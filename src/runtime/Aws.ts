@@ -18,743 +18,1089 @@
 
 import { randomUUID } from 'crypto';
 import { Logger } from '@aws-lambda-powertools/logger';
+import { Tracer } from '@aws-lambda-powertools/tracer';
 import {
-  CloudFormationClient,
-  GetTemplateCommand,
-  paginateDescribeStacks,
-  Parameter,
-  UpdateStackCommand,
-  UpdateStackCommandOutput,
+    CloudFormationClient,
+    GetTemplateCommand,
+    paginateDescribeStacks,
+    Parameter,
+    UpdateStackCommand,
+    UpdateStackCommandOutput,
 } from '@aws-sdk/client-cloudformation';
 import {
-  BatchGetItemCommand,
-  DeleteItemCommand,
-  DeleteItemCommandOutput,
-  DynamoDBClient,
-  GetItemCommand,
-  PutItemCommand,
-  PutItemCommandOutput,
-  TransactWriteItemsCommand,
-  TransactWriteItemsCommandOutput,
-  UpdateItemCommand,
-  UpdateItemCommandOutput,
+    BatchGetItemCommand,
+    DeleteItemCommand,
+    DeleteItemCommandOutput,
+    DynamoDBClient,
+    GetItemCommand,
+    PutItemCommand,
+    PutItemCommandInput,
+    PutItemCommandOutput,
+    TransactWriteItemsCommand,
+    TransactWriteItemsCommandOutput,
+    UpdateItemCommand,
+    UpdateItemCommandInput,
+    UpdateItemCommandOutput,
 } from '@aws-sdk/client-dynamodb';
 import { KeysAndAttributes, TransactWriteItem } from '@aws-sdk/client-dynamodb/dist-types/models/models_0';
 import { Group, IdentitystoreClient, paginateListGroups, paginateListUsers, User } from '@aws-sdk/client-identitystore';
 import {
-  Account,
-  DescribeAccountCommand,
-  DescribeOrganizationalUnitCommand,
-  DescribeOrganizationCommand,
-  Organization,
-  OrganizationalUnit,
-  OrganizationsClient,
-  paginateListAccounts,
-  paginateListAccountsForParent,
-  paginateListOrganizationalUnitsForParent,
-  paginateListRoots,
-  Root,
+    Account,
+    DescribeAccountCommand,
+    DescribeOrganizationalUnitCommand,
+    DescribeOrganizationCommand,
+    Organization,
+    OrganizationalUnit,
+    OrganizationsClient,
+    paginateListAccounts,
+    paginateListAccountsForParent,
+    paginateListOrganizationalUnitsForParent,
+    paginateListRoots,
+    Root,
 } from '@aws-sdk/client-organizations';
 
-import { DescribeExecutionCommand, SFNClient } from '@aws-sdk/client-sfn';
-import { SendMessageCommand, SQSClient } from '@aws-sdk/client-sqs';
 import {
-  DescribePermissionSetCommand,
-  InstanceMetadata,
-  ListInstancesCommand,
-  paginateListPermissionSets,
-  PermissionSet,
-  PrincipalType,
-  SSOAdminClient,
-  TargetType,
+    DescribeExecutionCommand,
+    SFNClient,
+    StartExecutionCommand,
+    StartExecutionCommandInput,
+    StartExecutionCommandOutput,
+} from '@aws-sdk/client-sfn';
+import { SendMessageCommand, SendMessageCommandInput, SendMessageCommandOutput, SQSClient } from '@aws-sdk/client-sqs';
+import {
+    DescribePermissionSetCommand,
+    InstanceMetadata,
+    ListInstancesCommand,
+    paginateListPermissionSets,
+    PermissionSet,
+    PrincipalType,
+    SSOAdminClient,
+    TargetType,
 } from '@aws-sdk/client-sso-admin';
 import { marshall, unmarshall } from '@aws-sdk/util-dynamodb';
+
 import {
-  AccountAssignmentCommandInput,
-  AccountAssignmentInputs,
-  AccountAssignmentsExecutionStatus,
-  AssignmentPayloadType,
-  PermissionSetAssignmentProperties,
-  Target,
-  TargetOperation,
-} from './model';
+    AccountAssignmentCommandInput,
+    AccountAssignmentInputs,
+    AccountAssignmentsExecutionStatus,
+    AssignmentPayloadType,
+    PermissionSetAssignmentProperties,
+    Target,
+    TargetOperation,
+} from './Model';
 
 const logger = new Logger({ serviceName: 'Aws' });
 
-export class Aws {
+export interface AwsApiCalls {
 
-  // @ts-ignore
-  protected readonly configuration: object;
+    startExecution(input: StartExecutionCommandInput): Promise<StartExecutionCommandOutput>
 
-  private readonly organizationsClient: OrganizationsClient;
-  private readonly ssoAdminClient: SSOAdminClient;
-  private readonly identityStoreClient: IdentitystoreClient;
-  private readonly sfnClient: SFNClient;
-  private readonly sqsClient: SQSClient;
-  private readonly ddbClient: DynamoDBClient;
-  private readonly cfmClient: CloudFormationClient;
-  protected accountsByOrganizationalUnit: Map<OrganizationalUnit, Account[]>;
-  protected organizationalUnits: OrganizationalUnit[] | undefined;
-  protected groups: Group[] | undefined;
+    sendMessage(
+        input: SendMessageCommandInput,
+    ): Promise<SendMessageCommandOutput>;
 
-  protected users: User[] | undefined;
-  protected root: Root | undefined;
+    updateItem(input: UpdateItemCommandInput): Promise<UpdateItemCommandOutput>;
 
-  protected organization: Organization | undefined;
-  protected identityStoreMetaData: InstanceMetadata | undefined;
+    putItem(input: PutItemCommandInput): Promise<PutItemCommandOutput>;
 
-  protected permissionSets: PermissionSet[] | undefined;
-  private readonly tableName: string;
+    rerunPermissionSetAssignmentStack(
+        stackId: string,
+    ): Promise<UpdateStackCommandOutput[]>;
 
-  public constructor(configuration: object = {}, tableName: string | undefined = process.env.TABLE_NAME, kwargs: Record<string, any> = {}) {
+    getIdentityStoreInstanceMetadata(): Promise<InstanceMetadata>;
 
-    if (tableName == undefined) {
-      throw new Error('No table name specified');
-    }
-    this.tableName = tableName;
-    this.accountsByOrganizationalUnit = new Map<OrganizationalUnit, Account[]>();
-    this.configuration = configuration;
-    this.organizationsClient = new OrganizationsClient(configuration);
-    this.ssoAdminClient = new SSOAdminClient(configuration);
-    this.identityStoreClient = new IdentitystoreClient(configuration);
-    this.sfnClient = new SFNClient(configuration);
-    this.ddbClient = kwargs != undefined && 'ddbClient' in kwargs ? kwargs.ddbClient as DynamoDBClient : new DynamoDBClient(configuration);
-    this.cfmClient = new CloudFormationClient(configuration);
-    this.sqsClient = new SQSClient(configuration);
-  }
+    getRoot(): Promise<Root>;
 
-  //TODO: This needs to be moved to a state machine
-  async rerunPermissionSetAssignmentStack(stackId: string): Promise<UpdateStackCommandOutput[]> {
-    const paginator = paginateDescribeStacks({
-      client: this.cfmClient,
-    }, {
-      StackName: stackId,
-    });
-    const results: UpdateStackCommandOutput[] = [];
-    for await (const page of paginator) {
-      // page contains a single paginated output.
-      if (page.Stacks != undefined) {
-        for (const stack of page.Stacks) {
-          try {
-            const parameters = stack.Parameters;
+    getOrganization(): Promise<Organization>;
 
-            if (parameters != undefined) {
-              const updatedParameters: Parameter[] = parameters.map(value => {
-                const param: Parameter = {
-                  ParameterKey: value.ParameterKey,
+    listAccountsForOrganizationalUnit(
+        organizationalUnit: OrganizationalUnit,
+    ): Promise<Account[]>;
 
-                };
-                if (value.ParameterKey != 'ForceUpdate') {
-                  param.UsePreviousValue = true;
-                }
-                return param;
+    getGroupsByName(names: string[]): Promise<Group[]>;
 
-              });
-              const forceUpdate: Parameter | undefined = updatedParameters.find(value => {
-                return value.ParameterKey == 'ForceUpdate';
-              });
-              const uuid = randomUUID();
-              if (forceUpdate == undefined) {
+    listGroups(): Promise<Group[]>;
 
-                logger.debug(`Parameter \'ForceUpdate\' not found, adding ${uuid}`);
-                updatedParameters.push({
-                  ParameterKey: 'ForceUpdate',
-                  ParameterValue: uuid,
-                });
-              } else {
-                forceUpdate.ParameterValue = uuid;
-              }
-              const templateBody = await this.cfmClient.send(new GetTemplateCommand({
-                StackName: stackId,
-              }));
-              logger.debug(`Rerunning stack ${stackId} with parameters ${JSON.stringify(updatedParameters)}`);
-              const update = await this.cfmClient.send(new UpdateStackCommand({
-                StackName: stackId,
-                Parameters: updatedParameters,
-                TemplateBody: templateBody.TemplateBody,
-              }));
-              results.push(update);
-            } else {
-              logger.warn(`Could not get parameters for stack ${stackId} `);
-            }
-          } catch (e: any) {
-            const error = e as Error;
-            logger.error(`${error.name}: ${error.message} - ${error.stack}`);
+    getUsersByName(names: string[]): Promise<User[]>;
 
-          }
+    listUsers(): Promise<User[]>;
 
+    getPermissionSetsByName(names: string[]): Promise<PermissionSet[]>;
+
+    listPermissionSet(): Promise<PermissionSet[]>;
+
+    startAccountAssignmentsExecutions(
+        queueUrl: string,
+        inputs: AccountAssignmentCommandInput[],
+    ): Promise<void>;
+
+    startAccountAssignmentsExecution(
+        queueUrl: string,
+        inputs: AccountAssignmentCommandInput[],
+    ): Promise<void>;
+
+    getAccountAssignmentsExecutionStatus(
+        executionArn: string,
+    ): Promise<AccountAssignmentsExecutionStatus>;
+
+    accountAssignmentInputs(
+        properties: PermissionSetAssignmentProperties,
+    ): Promise<AccountAssignmentInputs>;
+
+    accountAssignmentCommandInputs(
+        type: AssignmentPayloadType,
+        properties: PermissionSetAssignmentProperties,
+    ): Promise<[AccountAssignmentCommandInput[], TargetOperation[]]>;
+
+    mapAccountAssignmentCommandInput(
+        type: AssignmentPayloadType,
+        principalIds: string[],
+        principalType: PrincipalType,
+        instanceArn: string,
+        permissionSetArns: string[],
+        targetIds: string[],
+    ): AccountAssignmentCommandInput[];
+
+    putExecutionRecord(
+        tableName: string,
+        physicalResourceId: string,
+        executionArns: string[],
+    ): Promise<PutItemCommandOutput>;
+
+    getStackAssociations(
+        tableName: string,
+        organizationalUnit: OrganizationalUnit,
+        account: Account,
+    ): Promise<Record<string, any>[]>;
+
+    mapOrganizationalUnitNamesToTargets(names: string[]): Promise<Target[]>;
+
+    mapAccountIdsToTargets(accountIds: string[]): Promise<Target[]>;
+
+    resolveOrganizationalUnit(
+        name: string,
+        parentOrganizationalUnitId: string | undefined,
+    ): Promise<Target | undefined>;
+
+    associateTargetsToStack(
+        tableName: string,
+        stackId: string,
+        targetOperations: TargetOperation[],
+    ): Promise<TransactWriteItemsCommandOutput | undefined>;
+
+    associateStackToAccountId(
+        tableName: string,
+        accountId: string,
+        stackId: string,
+    ): Promise<UpdateItemCommandOutput>;
+
+    deleteExecutionRecord(
+        tableName: string,
+        physicalResourceId: string,
+    ): Promise<DeleteItemCommandOutput>;
+
+    getExecutionArnFromPhysicalResourceId(
+        tableName: string,
+        physicalResourceId: string,
+    ): Promise<string[]>;
+}
+
+export class Aws implements AwsApiCalls {
+    static instance(
+        config: { [key: string]: any | undefined } = {},
+        tracer: Tracer | undefined = undefined,
+    ) {
+        if (this._instance == undefined) {
+            this._instance = new Aws(config, tracer);
         }
-      } else {
-        logger.warn(`Could not find stack with stackId: ${stackId}`);
-      }
+        return this._instance;
     }
-    return results;
 
+    private static _instance: Aws | undefined;
 
-  }
+    private _organizationsClient: OrganizationsClient | undefined;
+    private _ssoAdminClient: SSOAdminClient | undefined;
+    private _identityStoreClient: IdentitystoreClient | undefined;
+    private _sfnClient: SFNClient | undefined;
+    private _sqsClient: SQSClient | undefined;
+    private _ddbClient: DynamoDBClient | undefined;
+    private _cfmClient: CloudFormationClient | undefined;
+    // private tableName: string=tableName: string | undefined = process.env.TABLE_NAME
+    readonly config: { [key: string]: any | undefined };
+    readonly _tracer: Tracer | undefined;
 
-  async getIdentityStoreInstanceMetadata(): Promise<InstanceMetadata> {
-    if (this.identityStoreMetaData == undefined) {
-      const response = await this.ssoAdminClient.send(new ListInstancesCommand({}));
-      if (response.Instances != undefined && response.Instances.length > 0) {
-        this.identityStoreMetaData = response.Instances[0];
-      } else {
-        throw new Error('Could not retrieve identity store id');
-      }
+    protected accountsByOrganizationalUnit: Map<OrganizationalUnit, Account[]> =
+        new Map<OrganizationalUnit, Account[]>();
+    protected organizationalUnits: OrganizationalUnit[] | undefined;
+    protected groups: Group[] | undefined;
+    protected users: User[] | undefined;
+    protected root: Root | undefined;
+    protected organization: Organization | undefined;
+    protected identityStoreMetaData: InstanceMetadata | undefined;
+    protected permissionSets: PermissionSet[] | undefined;
+
+    private constructor(
+        config: { [key: string]: any | undefined } = {},
+        tracer: Tracer | undefined,
+    ) {
+        this.config = config;
+        this._tracer = tracer;
     }
-    return this.identityStoreMetaData;
-  }
 
-  async getRoot(): Promise<Root> {
-    if (this.root == undefined) {
-      const paginator = paginateListRoots({
-        client: this.organizationsClient,
-      }, {});
-      for await (const page of paginator) {
-        // page contains a single paginated output.
-        if (page.Roots != undefined) {
-          this.root = page.Roots[0];
-        } else {
-          throw new Error('Could not get organization root');
+    private get cfmClient(): CloudFormationClient {
+        if (this._cfmClient == undefined) {
+            this._cfmClient = this._tracer
+                ? this._tracer.captureAWSv3Client(new CloudFormationClient(this.config))
+                : new CloudFormationClient(this.config);
         }
-      }
+        return this._cfmClient;
     }
-    return this.root!;
-  }
 
-  async getOrganization(): Promise<Organization> {
-    if (this.organization == undefined) {
-      const response = await this.organizationsClient.send(new DescribeOrganizationCommand({}));
-      if (response.Organization != undefined) {
-        this.organization = response.Organization;
-      }
-    }
-    return this.organization!;
-  }
-
-  async listAccountsForOrganizationalUnit(organizationalUnit: OrganizationalUnit): Promise<Account[]> {
-    if (this.accountsByOrganizationalUnit.has(organizationalUnit)) {
-      return this.accountsByOrganizationalUnit.get(organizationalUnit)!;
-    } else {
-      const accounts: Account[] = [];
-      let paginator;
-      if (organizationalUnit.Id!.startsWith('r-')) {
-        paginator = paginateListAccounts({
-          client: this.organizationsClient,
-        }, {});
-      } else {
-        paginator = paginateListAccountsForParent({
-          client: this.organizationsClient,
-        }, {
-          ParentId: organizationalUnit.Id,
-        });
-      }
-      for await (const page of paginator) {
-        // page contains a single paginated output.
-        if (page.Accounts != undefined) {
-          accounts.push(...page.Accounts);
+    private get organizationsClient(): OrganizationsClient {
+        if (this._organizationsClient == undefined) {
+            this._organizationsClient = this._tracer
+                ? this._tracer.captureAWSv3Client(new OrganizationsClient(this.config))
+                : new OrganizationsClient(this.config);
         }
-      }
-      this.accountsByOrganizationalUnit.set(organizationalUnit, accounts);
-      return accounts;
+        return this._organizationsClient;
     }
-  }
 
-
-  async getGroupsByName(names: string[]): Promise<Group[]> {
-    const groups = await this.listGroups();
-    return groups.filter(value => {
-      return (value.DisplayName != undefined && names.indexOf(value.DisplayName) != -1);
-    });
-  }
-
-  async listGroups(): Promise<Group[]> {
-    if (this.groups == undefined) {
-      this.groups = [];
-      const metadata = await this.getIdentityStoreInstanceMetadata();
-      const paginator = paginateListGroups({
-        client: this.identityStoreClient,
-      }, {
-        IdentityStoreId: metadata.IdentityStoreId,
-      });
-      for await (const page of paginator) {
-        // page contains a single paginated output.
-        if (page.Groups != undefined) {
-          this.groups.push(...page.Groups);
+    private get ssoAdminClient(): SSOAdminClient {
+        if (this._ssoAdminClient == undefined) {
+            this._ssoAdminClient = this._tracer
+                ? this._tracer.captureAWSv3Client(new SSOAdminClient(this.config))
+                : new SSOAdminClient(this.config);
         }
-      }
+        return this._ssoAdminClient;
     }
-    return this.groups;
-  }
 
-  async getUsersByName(names: string[]): Promise<User[]> {
-    const users = await this.listUsers();
-    return users.filter(value => {
-      return (value.UserName != undefined && names.indexOf(value.UserName) != -1);
-    });
-  }
-
-  async listUsers(): Promise<User[]> {
-    if (this.users == undefined) {
-      this.users = [];
-      const metadata = await this.getIdentityStoreInstanceMetadata();
-      const paginator = paginateListUsers({
-        client: this.identityStoreClient,
-      }, {
-        IdentityStoreId: metadata.IdentityStoreId,
-      });
-      for await (const page of paginator) {
-        // page contains a single paginated output.
-        if (page.Users != undefined) {
-          this.users.push(...page.Users);
+    private get identityStoreClient(): IdentitystoreClient {
+        if (this._identityStoreClient == undefined) {
+            this._identityStoreClient = this._tracer
+                ? this._tracer.captureAWSv3Client(new IdentitystoreClient(this.config))
+                : new IdentitystoreClient(this.config);
         }
-      }
+        return this._identityStoreClient;
     }
-    return this.users;
-  }
 
-  async getPermissionSetsByName(names: string[]): Promise<PermissionSet[]> {
-    const permissionSets = await this.listPermissionSet();
-    return permissionSets.filter(value => {
-      return (value.Name != undefined && names.indexOf(value.Name) != -1);
-    });
-  }
-
-  async listPermissionSet(): Promise<PermissionSet[]> {
-    if (this.permissionSets == undefined) {
-      this.permissionSets = [];
-      const metadata = await this.getIdentityStoreInstanceMetadata();
-      const paginator = paginateListPermissionSets({
-        client: this.ssoAdminClient,
-      }, {
-        InstanceArn: metadata.InstanceArn,
-      });
-      for await (const page of paginator) {
-
-        // page contains a single paginated output.
-        if (page.PermissionSets != undefined) {
-          for (const permissionSetArn of page.PermissionSets) {
-            const response = await this.ssoAdminClient.send(new DescribePermissionSetCommand({
-              PermissionSetArn: permissionSetArn,
-              InstanceArn: metadata.InstanceArn,
-            }));
-            if (response.PermissionSet != undefined) {
-              this.permissionSets.push(response.PermissionSet);
-            }
-          }
+    private get sfnClient(): SFNClient {
+        if (this._sfnClient == undefined) {
+            this._sfnClient = this._tracer
+                ? this._tracer.captureAWSv3Client(new SFNClient(this.config))
+                : new SFNClient(this.config);
         }
-      }
-    }
-    return this.permissionSets;
-  }
-
-
-  private chunk<X>(arr: Array<X>, size: number): Array<X>[] {
-    return Array.from({ length: Math.ceil(arr.length / size) }, (_v, i) =>
-      arr.slice(i * size, i * size + size),
-    );
-  }
-
-  async startAccountAssignmentsExecutions(queueUrl: string, inputs: AccountAssignmentCommandInput[]): Promise<void> {
-
-    const chunks = this.chunk(inputs, 100);
-    for (const c of chunks) {
-      await this.startAccountAssignmentsExecution(queueUrl, c);
+        return this._sfnClient;
     }
 
-  }
-
-  async startAccountAssignmentsExecution(queueUrl: string, inputs: AccountAssignmentCommandInput[]): Promise<void> {
-
-    logger.debug(`startAccountAssignmentsExecution: queueUrl=${queueUrl}, inputs=${JSON.stringify(inputs)}`);
-    //we use a single message group id b/c we  want all items to be processed in order, there is no grouping
-    await this.sqsClient.send(new SendMessageCommand({
-      QueueUrl: queueUrl,
-      MessageBody: JSON.stringify(inputs),
-      MessageGroupId: 'PermisssionSetAssignmentProvider',
-
-    }));
-
-  }
-
-  async getAccountAssignmentsExecutionStatus(executionArn: string): Promise<AccountAssignmentsExecutionStatus> {
-    const response = await this.sfnClient.send(new DescribeExecutionCommand({
-      executionArn: executionArn,
-    }));
-    logger.debug(`getAccountAssignmentsExecutionStatus = ${JSON.stringify(response)}`);
-    return {
-      status: response.status,
-      error: response.error,
-      cause: response.cause,
-    };
-  }
-
-  async accountAssignmentInputs(properties: PermissionSetAssignmentProperties): Promise<AccountAssignmentInputs> {
-    const targetIds: string[] = properties.TargetAccountIds != undefined ? [...properties.TargetAccountIds] : [];
-    const groupIds: string[] = [];
-    const userIds: string[] = [];
-    const permissionSetArns: string[] = [];
-    const targets: Target[] = [];
-    const organization = await this.getOrganization();
-    const managementAccountId = organization.MasterAccountId;
-    if (properties.TargetAccountIds != undefined) {
-      const targetAccountIds: string[] = properties.TargetAccountIds;
-      const targetAccounts = await this.mapAccountIdsToTargets(targetAccountIds);
-      for (const account of targetAccounts) {
-        if (account.Id != undefined && account.Id != managementAccountId) {
-          targetIds.push(account.Id);
-          targets.push(account);
+    private get sqsClient(): SQSClient {
+        if (this._sqsClient == undefined) {
+            this._sqsClient = this._tracer
+                ? this._tracer.captureAWSv3Client(new SQSClient(this.config))
+                : new SQSClient(this.config);
         }
-      }
-
+        return this._sqsClient;
     }
-    //get all the accounts for each listed ou
-    if (properties.TargetOrganizationalUnitNames != undefined) {
-      const targetOrganizationalUnitNames: string[] = properties.TargetOrganizationalUnitNames;
-      const organizationalUnits = await this.mapOrganizationalUnitNamesToTargets(targetOrganizationalUnitNames);
-      for (const organizationalUnit of organizationalUnits) {
-        const accounts = await this.listAccountsForOrganizationalUnit(organizationalUnit);
-        for (const account of accounts) {
-          if (account.Id != undefined && account.Id != managementAccountId) {
-            targetIds.push(account.Id);
 
-          }
-
+    private get ddbClient(): DynamoDBClient {
+        if (this._ddbClient == undefined) {
+            this._ddbClient = this._tracer
+                ? this._tracer.captureAWSv3Client(
+                    new DynamoDBClient({
+                        ...this.config,
+                        retryMode: 'adaptive',
+                    }),
+                )
+                : new DynamoDBClient(this.config);
         }
-        targets.push(organizationalUnit);
-      }
+        return this._ddbClient;
     }
-    if (properties.GroupNames != undefined) {
-      const groups = await this.getGroupsByName(properties.GroupNames);
-      for (const group of groups) {
-        if (group.GroupId != undefined) {
-          groupIds.push(group.GroupId);
-        }
-      }
-    }
-    if (properties.UserNames != undefined) {
-      const users = await this.getUsersByName(properties.UserNames);
-      for (const user of users) {
-        if (user.UserId != undefined) {
-          userIds.push(user.UserId);
-        }
-      }
-    }
-    if (properties.PermissionSetNames != undefined) {
-      const permissionSets = await this.getPermissionSetsByName(properties.PermissionSetNames);
-      for (const permissionSet of permissionSets) {
-        if (permissionSet.PermissionSetArn != undefined) {
-          permissionSetArns.push(permissionSet.PermissionSetArn);
-        }
-      }
-    }
-    const instanceMetadata = await this.getIdentityStoreInstanceMetadata();
-    if (instanceMetadata.InstanceArn == undefined) {
-      throw new Error('Could not retrieve identity store instance arn');
-    }
-    if (groupIds.length == 0 && userIds.length == 0) {
-      throw new Error('No principal ids specified');
-    }
-    if (targetIds.length == 0) {
-      logger.warn('No target ids specified');
-    }
-    if (permissionSetArns.length == 0) {
-      throw new Error('No permission sets specified');
-    }
-    //use converted sets here to eliminate duplicate values
-    return {
-      groupIds: Array.from(new Set<string>(groupIds)),
-      permissionSetArns: Array.from(new Set<string>(permissionSetArns)),
-      targetIds: Array.from(new Set<string>(targetIds)),
-      userIds: Array.from(new Set<string>(userIds)),
-      targets: targets,
-    };
-  }
 
-  //TODO: We need to check for existing permission set assignments for CREATE and filter them out
-  async accountAssignmentCommandInputs(type: AssignmentPayloadType, properties: PermissionSetAssignmentProperties):
-  Promise<[AccountAssignmentCommandInput[], TargetOperation[]]> {
-    logger.debug(`accountAssignmentCommandInputs: ${type}, properties: ${JSON.stringify(properties)}`);
-    const accountAssignmentInputs = await this.accountAssignmentInputs(properties);
-    logger.debug(`accountAssignmentInputs: ${JSON.stringify(accountAssignmentInputs)}`);
-    const inputs: AccountAssignmentCommandInput[] = [];
-    const instanceMetadata = await this.getIdentityStoreInstanceMetadata();
-    inputs.push(...this.mapAccountAssignmentCommandInput(type, accountAssignmentInputs.groupIds, PrincipalType.GROUP, instanceMetadata.InstanceArn!,
-      accountAssignmentInputs.permissionSetArns, accountAssignmentInputs.targetIds));
-    inputs.push(...this.mapAccountAssignmentCommandInput(type, accountAssignmentInputs.userIds, PrincipalType.USER, instanceMetadata.InstanceArn!,
-      accountAssignmentInputs.permissionSetArns, accountAssignmentInputs.targetIds));
-    return [inputs, accountAssignmentInputs.targets.map(value => {
-      return {
-        target: value,
-        type: type,
-      };
-    })];
-  };
-
-
-  private mapAccountAssignmentCommandInput(type: AssignmentPayloadType, principalIds: string[], principalType: PrincipalType, instanceArn: string,
-    permissionSetArns: string[], targetIds: string[]): AccountAssignmentCommandInput[] {
-    const results: AccountAssignmentCommandInput[] = [];
-    for (const principalId of principalIds) {
-      for (const permissionSetArn of permissionSetArns) {
-        for (const targetId of targetIds) {
-          results.push({
-            input: {
-              PermissionSetArn: permissionSetArn,
-              InstanceArn: instanceArn,
-              PrincipalId: principalId,
-              TargetType: TargetType.AWS_ACCOUNT,
-              PrincipalType: principalType,
-              TargetId: targetId,
+    //TODO: This needs to be moved to a state machine
+    async rerunPermissionSetAssignmentStack(
+        stackId: string,
+    ): Promise<UpdateStackCommandOutput[]> {
+        const paginator = paginateDescribeStacks(
+            {
+                client: this.cfmClient,
             },
-            type: type,
-          });
-        }
-      }
-
-    }
-    return results;
-  }
-
-  async putExecutionRecord(physicalResourceId: string, executionArns: string[]): Promise<PutItemCommandOutput> {
-    logger.debug(`putExecutionRecord: physicalResourceId=${physicalResourceId}, executionArns=${executionArns}`);
-    const item = {
-      pk: physicalResourceId,
-      executionArn: executionArns,
-    };
-    return this.ddbClient.send(new PutItemCommand({
-      TableName: this.tableName,
-      Item: marshall(item),
-    }));
-  }
-
-  async getStackAssociations(organizationalUnit: OrganizationalUnit, account: Account): Promise<Record<string, any>[]> {
-    const requestItems: Record<string, KeysAndAttributes> = {};
-    const root = await this.getRoot();
-    requestItems[this.tableName] = {
-      Keys: [{
-
-        pk: { S: organizationalUnit.Id! },
-      }, {
-
-        pk: { S: account.Id! },
-      }, {
-        pk: { S: root.Id! },
-      }],
-
-    };
-    const responses = await this.ddbClient.send(new BatchGetItemCommand({
-      RequestItems: requestItems,
-    }));
-    const results: Record<string, any>[] = [];
-    if (responses.Responses != undefined && responses.Responses[this.tableName]) {
-      for (const response of responses.Responses[this.tableName]) {
-        const unmarshalledResponse = unmarshall(response);
-        results.push({
-          pk: unmarshalledResponse.pk,
-          target_name: unmarshalledResponse.target_name,
-          target_arn: unmarshalledResponse.target_arn,
-          stackIds: Array.from(unmarshalledResponse.stackIds),
-        });
-      }
-    } else {
-      logger.info(`No associations for organizationalUnit ${JSON.stringify(organizationalUnit)} or account ${JSON.stringify(account)}`);
-    }
-    return results;
-
-  }
-
-  async mapOrganizationalUnitNamesToTargets(names: string[]): Promise<Target[]> {
-    const results: Target[] = [];
-    for (const name of names) {
-      const t = await this.resolveOrganizationalUnit(name);
-      if (t != undefined) {
-        results.push(t);
-      }
-    }
-    return results;
-  }
-
-  async mapAccountIdsToTargets(accountIds: string[]): Promise<Target[]> {
-    const results: Target[] = [];
-    for (const accountId of accountIds) {
-      const response = await this.organizationsClient.send(new DescribeAccountCommand({
-        AccountId: accountId,
-      }));
-      if (response.Account != undefined) {
-        results.push(response.Account);
-
-      } else {
-        logger.warn(`Could not find account with id ${accountId}`);
-      }
-    }
-    return results;
-  }
-
-  async resolveOrganizationalUnit(name: string, parentOrganizationalUnitId: string | undefined = undefined): Promise<Target | undefined> {
-    const nameParts = name.split('.');
-    if (nameParts.length > 1) {
-      //it's dot notated
-      const namePart = nameParts[0];
-      const organizationalUnit = await this.resolveOrganizationalUnit(namePart, parentOrganizationalUnitId);
-      if (organizationalUnit != undefined) {
-        const re = new RegExp(`${namePart}\.?`, 'g');
-        const remainingName = name.replace(re, '');
-        if (remainingName.length > 0) {
-          return this.resolveOrganizationalUnit(remainingName, organizationalUnit.Id);
-        } else {
-          return organizationalUnit;
-        }
-      } else {
-        logger.warn(`Could not find organizational unit for ${name}`);
-        return undefined;
-      }
-
-    } else {
-
-      if (name.startsWith('r-') || name.toLowerCase() == 'root') {
-        return this.getRoot();
-      } else if (name.startsWith('ou-')) {
-        //it's an ou id
-        const response = await this.organizationsClient.send(new DescribeOrganizationalUnitCommand({
-          OrganizationalUnitId: name,
-        }));
-        if (response.OrganizationalUnit != undefined) {
-          return response.OrganizationalUnit;
-        } else {
-          return undefined;
-        }
-      } else {
-        //it's an ou id
-        if (parentOrganizationalUnitId == undefined) {
-          const root = await this.getRoot();
-          parentOrganizationalUnitId = root.Id;
-        }
-
-        const paginator = paginateListOrganizationalUnitsForParent({
-          client: this.organizationsClient,
-        }, {
-          ParentId: parentOrganizationalUnitId,
-        });
-        let result: OrganizationalUnit | undefined;
+            {
+                StackName: stackId,
+            },
+        );
+        const results: UpdateStackCommandOutput[] = [];
         for await (const page of paginator) {
-          // page contains a single paginated output.
-          if (page.OrganizationalUnits != undefined) {
-            result = page.OrganizationalUnits.find(value => {
-              return value.Name == name;
-            });
-            if (result != undefined) {
-              break;
+            // page contains a single paginated output.
+            if (page.Stacks != undefined) {
+                for (const stack of page.Stacks) {
+                    try {
+                        const parameters = stack.Parameters;
+
+                        if (parameters != undefined) {
+                            const updatedParameters: Parameter[] = parameters.map((value) => {
+                                const param: Parameter = {
+                                    ParameterKey: value.ParameterKey,
+                                };
+                                if (value.ParameterKey != 'ForceUpdate') {
+                                    param.UsePreviousValue = true;
+                                }
+                                return param;
+                            });
+                            const forceUpdate: Parameter | undefined = updatedParameters.find(
+                                (value) => {
+                                    return value.ParameterKey == 'ForceUpdate';
+                                },
+                            );
+                            const uuid = randomUUID();
+                            if (forceUpdate == undefined) {
+                                logger.debug(
+                                    `Parameter \'ForceUpdate\' not found, adding ${uuid}`,
+                                );
+                                updatedParameters.push({
+                                    ParameterKey: 'ForceUpdate',
+                                    ParameterValue: uuid,
+                                });
+                            } else {
+                                forceUpdate.ParameterValue = uuid;
+                            }
+                            const templateBody = await this.cfmClient.send(
+                                new GetTemplateCommand({
+                                    StackName: stackId,
+                                }),
+                            );
+                            logger.debug(
+                                `Rerunning stack ${stackId} with parameters ${JSON.stringify(updatedParameters)}`,
+                            );
+                            const update = await this.cfmClient.send(
+                                new UpdateStackCommand({
+                                    StackName: stackId,
+                                    Parameters: updatedParameters,
+                                    TemplateBody: templateBody.TemplateBody,
+                                }),
+                            );
+                            results.push(update);
+                        } else {
+                            logger.warn(`Could not get parameters for stack ${stackId} `);
+                        }
+                    } catch (e: any) {
+                        const error = e as Error;
+                        logger.error(`${error.name}: ${error.message} - ${error.stack}`);
+                    }
+                }
+            } else {
+                logger.warn(`Could not find stack with stackId: ${stackId}`);
             }
-          }
         }
-        if (result != undefined) {
-          return result;
+        return results;
+    }
+
+    async getIdentityStoreInstanceMetadata(): Promise<InstanceMetadata> {
+        if (this.identityStoreMetaData == undefined) {
+            const response = await this.ssoAdminClient.send(
+                new ListInstancesCommand({}),
+            );
+            if (response.Instances != undefined && response.Instances.length > 0) {
+                this.identityStoreMetaData = response.Instances[0];
+            } else {
+                throw new Error('Could not retrieve identity store id');
+            }
+        }
+        return this.identityStoreMetaData;
+    }
+
+    async getRoot(): Promise<Root> {
+        if (this.root == undefined) {
+            const paginator = paginateListRoots(
+                {
+                    client: this.organizationsClient,
+                },
+                {},
+            );
+            for await (const page of paginator) {
+                // page contains a single paginated output.
+                if (page.Roots != undefined) {
+                    this.root = page.Roots[0];
+                } else {
+                    throw new Error('Could not get organization root');
+                }
+            }
+        }
+        return this.root!;
+    }
+
+    async getOrganization(): Promise<Organization> {
+        if (this.organization == undefined) {
+            const response = await this.organizationsClient.send(
+                new DescribeOrganizationCommand({}),
+            );
+            if (response.Organization != undefined) {
+                this.organization = response.Organization;
+            }
+        }
+        return this.organization!;
+    }
+
+    async listAccountsForOrganizationalUnit(
+        organizationalUnit: OrganizationalUnit,
+    ): Promise<Account[]> {
+        if (this.accountsByOrganizationalUnit.has(organizationalUnit)) {
+            return this.accountsByOrganizationalUnit.get(organizationalUnit)!;
         } else {
-          logger.warn(`Could not find organizational unit for ${name}`);
-          return undefined;
+            const accounts: Account[] = [];
+            let paginator;
+            if (organizationalUnit.Id!.startsWith('r-')) {
+                paginator = paginateListAccounts(
+                    {
+                        client: this.organizationsClient,
+                    },
+                    {},
+                );
+            } else {
+                paginator = paginateListAccountsForParent(
+                    {
+                        client: this.organizationsClient,
+                    },
+                    {
+                        ParentId: organizationalUnit.Id,
+                    },
+                );
+            }
+            for await (const page of paginator) {
+                // page contains a single paginated output.
+                if (page.Accounts != undefined) {
+                    accounts.push(...page.Accounts);
+                }
+            }
+            this.accountsByOrganizationalUnit.set(organizationalUnit, accounts);
+            return accounts;
+        }
+    }
+
+    async getGroupsByName(names: string[]): Promise<Group[]> {
+        const groups = await this.listGroups();
+        return groups.filter((value) => {
+            return (
+                value.DisplayName != undefined && names.indexOf(value.DisplayName) != -1
+            );
+        });
+    }
+
+    async listGroups(): Promise<Group[]> {
+        if (this.groups == undefined) {
+            this.groups = [];
+            const metadata = await this.getIdentityStoreInstanceMetadata();
+            const paginator = paginateListGroups(
+                {
+                    client: this.identityStoreClient,
+                },
+                {
+                    IdentityStoreId: metadata.IdentityStoreId,
+                },
+            );
+            for await (const page of paginator) {
+                // page contains a single paginated output.
+                if (page.Groups != undefined) {
+                    this.groups.push(...page.Groups);
+                }
+            }
+        }
+        return this.groups;
+    }
+
+    async getUsersByName(names: string[]): Promise<User[]> {
+        const users = await this.listUsers();
+        return users.filter((value) => {
+            return value.UserName != undefined && names.indexOf(value.UserName) != -1;
+        });
+    }
+
+    async listUsers(): Promise<User[]> {
+        if (this.users == undefined) {
+            this.users = [];
+            const metadata = await this.getIdentityStoreInstanceMetadata();
+            const paginator = paginateListUsers(
+                {
+                    client: this.identityStoreClient,
+                },
+                {
+                    IdentityStoreId: metadata.IdentityStoreId,
+                },
+            );
+            for await (const page of paginator) {
+                // page contains a single paginated output.
+                if (page.Users != undefined) {
+                    this.users.push(...page.Users);
+                }
+            }
+        }
+        return this.users;
+    }
+
+    async getPermissionSetsByName(names: string[]): Promise<PermissionSet[]> {
+        const permissionSets = await this.listPermissionSet();
+        return permissionSets.filter((value) => {
+            return value.Name != undefined && names.indexOf(value.Name) != -1;
+        });
+    }
+
+    async listPermissionSet(): Promise<PermissionSet[]> {
+        if (this.permissionSets == undefined) {
+            this.permissionSets = [];
+            const metadata = await this.getIdentityStoreInstanceMetadata();
+            const paginator = paginateListPermissionSets(
+                {
+                    client: this.ssoAdminClient,
+                },
+                {
+                    InstanceArn: metadata.InstanceArn,
+                },
+            );
+            for await (const page of paginator) {
+                // page contains a single paginated output.
+                if (page.PermissionSets != undefined) {
+                    for (const permissionSetArn of page.PermissionSets) {
+                        const response = await this.ssoAdminClient.send(
+                            new DescribePermissionSetCommand({
+                                PermissionSetArn: permissionSetArn,
+                                InstanceArn: metadata.InstanceArn,
+                            }),
+                        );
+                        if (response.PermissionSet != undefined) {
+                            this.permissionSets.push(response.PermissionSet);
+                        }
+                    }
+                }
+            }
+        }
+        return this.permissionSets;
+    }
+
+    private chunk<X>(arr: Array<X>, size: number): Array<X>[] {
+        return Array.from({ length: Math.ceil(arr.length / size) }, (_v, i) =>
+            arr.slice(i * size, i * size + size),
+        );
+    }
+
+    async startAccountAssignmentsExecutions(
+        queueUrl: string,
+        inputs: AccountAssignmentCommandInput[],
+    ): Promise<void> {
+        const chunks = this.chunk(inputs, 100);
+        for (const c of chunks) {
+            await this.startAccountAssignmentsExecution(queueUrl, c);
+        }
+    }
+
+    async startAccountAssignmentsExecution(
+        queueUrl: string,
+        inputs: AccountAssignmentCommandInput[],
+    ): Promise<void> {
+        logger.debug(
+            `startAccountAssignmentsExecution: queueUrl=${queueUrl}, inputs=${JSON.stringify(inputs)}`,
+        );
+        //we use a single message group id b/c we  want all items to be processed in order, there is no grouping
+        await this.sqsClient.send(
+            new SendMessageCommand({
+                QueueUrl: queueUrl,
+                MessageBody: JSON.stringify({
+                    inputs: inputs,
+                }),
+                MessageGroupId: 'PermissionSetAssignmentProvider',
+            }),
+        );
+    }
+
+    async getAccountAssignmentsExecutionStatus(
+        executionArn: string,
+    ): Promise<AccountAssignmentsExecutionStatus> {
+        const response = await this.sfnClient.send(
+            new DescribeExecutionCommand({
+                executionArn: executionArn,
+            }),
+        );
+        logger.debug(
+            `getAccountAssignmentsExecutionStatus = ${JSON.stringify(response)}`,
+        );
+        return {
+            status: response.status,
+            error: response.error,
+            cause: response.cause,
+        };
+    }
+
+    async accountAssignmentInputs(
+        properties: PermissionSetAssignmentProperties,
+    ): Promise<AccountAssignmentInputs> {
+        const targetIds: string[] =
+            properties.TargetAccountIds != undefined
+                ? [...properties.TargetAccountIds]
+                : [];
+        const groupIds: string[] = [];
+        const userIds: string[] = [];
+        const permissionSetArns: string[] = [];
+        const targets: Target[] = [];
+        const organization = await this.getOrganization();
+        const managementAccountId = organization.MasterAccountId;
+        if (properties.TargetAccountIds != undefined) {
+            const targetAccountIds: string[] = properties.TargetAccountIds;
+            const targetAccounts =
+                await this.mapAccountIdsToTargets(targetAccountIds);
+            for (const account of targetAccounts) {
+                if (account.Id != undefined && account.Id != managementAccountId) {
+                    targetIds.push(account.Id);
+                    targets.push(account);
+                }
+            }
+        }
+        //get all the accounts for each listed ou
+        if (properties.TargetOrganizationalUnitNames != undefined) {
+            const targetOrganizationalUnitNames: string[] =
+                properties.TargetOrganizationalUnitNames;
+            const organizationalUnits =
+                await this.mapOrganizationalUnitNamesToTargets(
+                    targetOrganizationalUnitNames,
+                );
+            for (const organizationalUnit of organizationalUnits) {
+                const accounts =
+                    await this.listAccountsForOrganizationalUnit(organizationalUnit);
+                for (const account of accounts) {
+                    if (account.Id != undefined && account.Id != managementAccountId) {
+                        targetIds.push(account.Id);
+                    }
+                }
+                targets.push(organizationalUnit);
+            }
+        }
+        if (properties.GroupNames != undefined) {
+            const groups = await this.getGroupsByName(properties.GroupNames);
+            for (const group of groups) {
+                if (group.GroupId != undefined) {
+                    groupIds.push(group.GroupId);
+                }
+            }
+        }
+        if (properties.UserNames != undefined) {
+            const users = await this.getUsersByName(properties.UserNames);
+            for (const user of users) {
+                if (user.UserId != undefined) {
+                    userIds.push(user.UserId);
+                }
+            }
+        }
+        if (properties.PermissionSetNames != undefined) {
+            const permissionSets = await this.getPermissionSetsByName(
+                properties.PermissionSetNames,
+            );
+            for (const permissionSet of permissionSets) {
+                if (permissionSet.PermissionSetArn != undefined) {
+                    permissionSetArns.push(permissionSet.PermissionSetArn);
+                }
+            }
+        }
+        const instanceMetadata = await this.getIdentityStoreInstanceMetadata();
+        if (instanceMetadata.InstanceArn == undefined) {
+            throw new Error('Could not retrieve identity store instance arn');
+        }
+        if (groupIds.length == 0 && userIds.length == 0) {
+            throw new Error('No principal ids specified');
+        }
+        if (targetIds.length == 0) {
+            logger.warn('No target ids specified');
+        }
+        if (permissionSetArns.length == 0) {
+            throw new Error('No permission sets specified');
+        }
+        //use converted sets here to eliminate duplicate values
+        return {
+            groupIds: Array.from(new Set<string>(groupIds)),
+            permissionSetArns: Array.from(new Set<string>(permissionSetArns)),
+            targetIds: Array.from(new Set<string>(targetIds)),
+            userIds: Array.from(new Set<string>(userIds)),
+            targets: targets,
+        };
+    }
+
+    //TODO: We need to check for existing permission set assignments for CREATE and filter them out
+    async accountAssignmentCommandInputs(
+        type: AssignmentPayloadType,
+        properties: PermissionSetAssignmentProperties,
+    ): Promise<[AccountAssignmentCommandInput[], TargetOperation[]]> {
+        logger.debug(
+            `accountAssignmentCommandInputs: ${type}, properties: ${JSON.stringify(properties)}`,
+        );
+        const accountAssignmentInputs =
+            await this.accountAssignmentInputs(properties);
+        logger.debug(
+            `accountAssignmentInputs: ${JSON.stringify(accountAssignmentInputs)}`,
+        );
+        const inputs: AccountAssignmentCommandInput[] = [];
+        const instanceMetadata = await this.getIdentityStoreInstanceMetadata();
+        inputs.push(
+            ...this.mapAccountAssignmentCommandInput(
+                type,
+                accountAssignmentInputs.groupIds,
+                PrincipalType.GROUP,
+                instanceMetadata.InstanceArn!,
+                accountAssignmentInputs.permissionSetArns,
+                accountAssignmentInputs.targetIds,
+            ),
+        );
+        inputs.push(
+            ...this.mapAccountAssignmentCommandInput(
+                type,
+                accountAssignmentInputs.userIds,
+                PrincipalType.USER,
+                instanceMetadata.InstanceArn!,
+                accountAssignmentInputs.permissionSetArns,
+                accountAssignmentInputs.targetIds,
+            ),
+        );
+        return [
+            inputs,
+            accountAssignmentInputs.targets.map((value) => {
+                return {
+                    target: value,
+                    type: type,
+                };
+            }),
+        ];
+    }
+
+    mapAccountAssignmentCommandInput(
+        type: AssignmentPayloadType,
+        principalIds: string[],
+        principalType: PrincipalType,
+        instanceArn: string,
+        permissionSetArns: string[],
+        targetIds: string[],
+    ): AccountAssignmentCommandInput[] {
+        const results: AccountAssignmentCommandInput[] = [];
+        for (const principalId of principalIds) {
+            for (const permissionSetArn of permissionSetArns) {
+                for (const targetId of targetIds) {
+                    results.push({
+                        input: {
+                            PermissionSetArn: permissionSetArn,
+                            InstanceArn: instanceArn,
+                            PrincipalId: principalId,
+                            TargetType: TargetType.AWS_ACCOUNT,
+                            PrincipalType: principalType,
+                            TargetId: targetId,
+                        },
+                        type: type,
+                    });
+                }
+            }
+        }
+        return results;
+    }
+
+    async putExecutionRecord(
+        tableName: string,
+        physicalResourceId: string,
+        executionArns: string[],
+    ): Promise<PutItemCommandOutput> {
+        logger.debug(
+            `putExecutionRecord: physicalResourceId=${physicalResourceId}, executionArns=${executionArns}`,
+        );
+        const item = {
+            pk: physicalResourceId,
+            executionArn: executionArns,
+        };
+        return this.ddbClient.send(
+            new PutItemCommand({
+                TableName: tableName,
+                Item: marshall(item),
+            }),
+        );
+    }
+
+    async getStackAssociations(
+        tableName: string,
+        organizationalUnit: OrganizationalUnit,
+        account: Account,
+    ): Promise<Record<string, any>[]> {
+        const requestItems: Record<string, KeysAndAttributes> = {};
+        const root = await this.getRoot();
+        requestItems[tableName] = {
+            Keys: [
+                {
+                    pk: { S: organizationalUnit.Id! },
+                },
+                {
+                    pk: { S: account.Id! },
+                },
+                {
+                    pk: { S: root.Id! },
+                },
+            ],
+        };
+        const responses = await this.ddbClient.send(
+            new BatchGetItemCommand({
+                RequestItems: requestItems,
+            }),
+        );
+        const results: Record<string, any>[] = [];
+        if (responses.Responses != undefined && responses.Responses[tableName]) {
+            for (const response of responses.Responses[tableName]) {
+                const unmarshalledResponse = unmarshall(response);
+                results.push({
+                    pk: unmarshalledResponse.pk,
+                    target_name: unmarshalledResponse.target_name,
+                    target_arn: unmarshalledResponse.target_arn,
+                    stackIds: Array.from(unmarshalledResponse.stackIds),
+                });
+            }
+        } else {
+            logger.info(
+                `No associations for organizationalUnit ${JSON.stringify(organizationalUnit)} or account ${JSON.stringify(account)}`,
+            );
+        }
+        return results;
+    }
+
+    async mapOrganizationalUnitNamesToTargets(
+        names: string[],
+    ): Promise<Target[]> {
+        const results: Target[] = [];
+        for (const name of names) {
+            const t = await this.resolveOrganizationalUnit(name);
+            if (t != undefined) {
+                results.push(t);
+            }
+        }
+        return results;
+    }
+
+    async mapAccountIdsToTargets(accountIds: string[]): Promise<Target[]> {
+        const results: Target[] = [];
+        for (const accountId of accountIds) {
+            const response = await this.organizationsClient.send(
+                new DescribeAccountCommand({
+                    AccountId: accountId,
+                }),
+            );
+            if (response.Account != undefined) {
+                results.push(response.Account);
+            } else {
+                logger.warn(`Could not find account with id ${accountId}`);
+            }
+        }
+        return results;
+    }
+
+    async resolveOrganizationalUnit(
+        name: string,
+        parentOrganizationalUnitId: string | undefined = undefined,
+    ): Promise<Target | undefined> {
+        const nameParts = name.split('.');
+        if (nameParts.length > 1) {
+            //it's dot notated
+            const namePart = nameParts[0];
+            const organizationalUnit = await this.resolveOrganizationalUnit(
+                namePart,
+                parentOrganizationalUnitId,
+            );
+            if (organizationalUnit != undefined) {
+                const re = new RegExp(`${namePart}\.?`, 'g');
+                const remainingName = name.replace(re, '');
+                if (remainingName.length > 0) {
+                    return this.resolveOrganizationalUnit(
+                        remainingName,
+                        organizationalUnit.Id,
+                    );
+                } else {
+                    return organizationalUnit;
+                }
+            } else {
+                logger.warn(`Could not find organizational unit for ${name}`);
+                return undefined;
+            }
+        } else {
+            if (name.startsWith('r-') || name.toLowerCase() == 'root') {
+                return this.getRoot();
+            } else if (name.startsWith('ou-')) {
+                //it's an ou id
+                const response = await this.organizationsClient.send(
+                    new DescribeOrganizationalUnitCommand({
+                        OrganizationalUnitId: name,
+                    }),
+                );
+                if (response.OrganizationalUnit != undefined) {
+                    return response.OrganizationalUnit;
+                } else {
+                    return undefined;
+                }
+            } else {
+                //it's an ou id
+                if (parentOrganizationalUnitId == undefined) {
+                    const root = await this.getRoot();
+                    parentOrganizationalUnitId = root.Id;
+                }
+
+                const paginator = paginateListOrganizationalUnitsForParent(
+                    {
+                        client: this.organizationsClient,
+                    },
+                    {
+                        ParentId: parentOrganizationalUnitId,
+                    },
+                );
+                let result: OrganizationalUnit | undefined;
+                for await (const page of paginator) {
+                    // page contains a single paginated output.
+                    if (page.OrganizationalUnits != undefined) {
+                        result = page.OrganizationalUnits.find((value) => {
+                            return value.Name == name;
+                        });
+                        if (result != undefined) {
+                            break;
+                        }
+                    }
+                }
+                if (result != undefined) {
+                    return result;
+                } else {
+                    logger.warn(`Could not find organizational unit for ${name}`);
+                    return undefined;
+                }
+            }
+        }
+    }
+
+    async associateTargetsToStack(
+        tableName: string,
+        stackId: string,
+        targetOperations: TargetOperation[],
+    ): Promise<TransactWriteItemsCommandOutput | undefined> {
+        logger.debug(
+            `associateTargetsToStack: stackId=${stackId}, targetOperations=${JSON.stringify(targetOperations)}`,
+        );
+        const statements: TransactWriteItem[] = [];
+        for (const targetOperation of targetOperations) {
+            const key = {
+                pk: {
+                    S: targetOperation.target.Id!,
+                },
+            };
+            const expressionAttributeValues = {
+                ':stackId': {
+                    SS: [stackId],
+                },
+                ':target_arn': {
+                    S: targetOperation.target.Arn!,
+                },
+                ':target_name': {
+                    S: targetOperation.target.Name!,
+                },
+            };
+            const expression = `${targetOperation.type == AssignmentPayloadType.CREATE ? 'ADD' : 'DELETE'} stackIds :stackId SET target_arn=:target_arn,\
+       target_name=:target_name`;
+            statements.push({
+                Update: {
+                    Key: key,
+                    TableName: tableName,
+                    UpdateExpression: expression,
+                    ExpressionAttributeValues: expressionAttributeValues,
+                },
+            });
         }
 
-
-      }
-    }
-  }
-
-  async associateTargetsToStack(stackId: string, targetOperations: TargetOperation[]): Promise<TransactWriteItemsCommandOutput | undefined> {
-    logger.debug(`associateTargetsToStack: stackId=${stackId}, targetOperations=${JSON.stringify(targetOperations)}`);
-    const statements: TransactWriteItem[] = [];
-    for (const targetOperation of targetOperations) {
-      const key = {
-        pk: {
-          S: targetOperation.target.Id!,
-        },
-
-      };
-      const expressionAttributeValues = {
-        ':stackId': {
-          SS: [stackId],
-        },
-        ':target_arn': {
-          S: targetOperation.target.Arn!,
-        },
-        ':target_name': {
-          S: targetOperation.target.Name!,
-        },
-      };
-      const expression = `${targetOperation.type == AssignmentPayloadType.CREATE ? 'ADD' : 'DELETE'} stackIds :stackId SET target_arn=:target_arn,\
-       target_name=:target_name`;
-      statements.push({
-
-        Update: {
-          Key: key,
-          TableName: this.tableName,
-          UpdateExpression: expression,
-          ExpressionAttributeValues: expressionAttributeValues,
-        },
-      });
-
+        let response: TransactWriteItemsCommandOutput | undefined = undefined;
+        logger.debug(`Statement:${JSON.stringify(statements)}`);
+        if (statements.length > 0) {
+            response = await this.ddbClient.send(
+                new TransactWriteItemsCommand({
+                    TransactItems: statements,
+                }),
+            );
+        }
+        return response;
     }
 
-    let response: TransactWriteItemsCommandOutput | undefined = undefined;
-    logger.debug(`Statement:${JSON.stringify(statements)}`);
-    if (statements.length > 0) {
-      response = await this.ddbClient.send(new TransactWriteItemsCommand({
-        TransactItems: statements,
-      }));
-
+    async associateStackToAccountId(
+        tableName: string,
+        accountId: string,
+        stackId: string,
+    ): Promise<UpdateItemCommandOutput> {
+        const key = {
+            pk: accountId,
+        };
+        return this.ddbClient.send(
+            new UpdateItemCommand({
+                TableName: tableName,
+                Key: marshall(key),
+                UpdateExpression: 'SET stackIds = list_append(stackIds,:i)',
+                ExpressionAttributeValues: {
+                    ':i': {
+                        L: [{ S: stackId }],
+                    },
+                },
+            }),
+        );
     }
-    return response;
 
-  }
-
-  async associateStackToAccountId(accountId: string, stackId: string): Promise<UpdateItemCommandOutput> {
-    const key = {
-      pk: accountId,
-
-    };
-    return this.ddbClient.send(new UpdateItemCommand({
-      TableName: this.tableName,
-      Key: marshall(key),
-      UpdateExpression: 'SET stackIds = list_append(stackIds,:i)',
-      ExpressionAttributeValues: {
-        ':i': {
-          L: [{ S: stackId }],
-        },
-      },
-    }));
-  }
-
-  async deleteExecutionRecord(physicalResourceId: string): Promise<DeleteItemCommandOutput> {
-    const key = {
-      pk: physicalResourceId,
-
-    };
-    return this.ddbClient.send(new DeleteItemCommand({
-      TableName: this.tableName,
-      Key: marshall(key),
-    }));
-  }
-
-  async getExecutionArnFromPhysicalResourceId(physicalResourceId: string): Promise<string[]> {
-    const key = {
-      pk: physicalResourceId,
-
-    };
-    const response = await this.ddbClient.send(new GetItemCommand({
-      TableName: this.tableName,
-      Key: marshall(key),
-    }));
-    if (response.Item != undefined) {
-      const executionArn = unmarshall(response.Item).executionArn;
-      if (Array.isArray(executionArn)) {
-        return executionArn;
-      } else {
-        return [executionArn];
-      }
-    } else {
-      throw new Error(`Could not find execution arn for physical resource id: ${physicalResourceId} `);
+    async deleteExecutionRecord(
+        tableName: string,
+        physicalResourceId: string,
+    ): Promise<DeleteItemCommandOutput> {
+        const key = {
+            pk: physicalResourceId,
+        };
+        return this.ddbClient.send(
+            new DeleteItemCommand({
+                TableName: tableName,
+                Key: marshall(key),
+            }),
+        );
     }
-  }
+
+    async getExecutionArnFromPhysicalResourceId(
+        tableName: string,
+        physicalResourceId: string,
+    ): Promise<string[]> {
+        const key = {
+            pk: physicalResourceId,
+        };
+        const response = await this.ddbClient.send(
+            new GetItemCommand({
+                TableName: tableName,
+                Key: marshall(key),
+            }),
+        );
+        if (response.Item != undefined) {
+            const executionArn = unmarshall(response.Item).executionArn;
+            if (Array.isArray(executionArn)) {
+                return executionArn;
+            } else {
+                return [executionArn];
+            }
+        } else {
+            throw new Error(
+                `Could not find execution arn for physical resource id: ${physicalResourceId} `,
+            );
+        }
+    }
+
+    async updateItem(input: UpdateItemCommandInput): Promise<UpdateItemCommandOutput> {
+        return this.ddbClient.send(new UpdateItemCommand(input));
+    }
+
+    async putItem(input: PutItemCommandInput): Promise<PutItemCommandOutput> {
+        return this.ddbClient.send(new PutItemCommand(input));
+    }
 
 
+    async startExecution(input: StartExecutionCommandInput): Promise<StartExecutionCommandOutput> {
+        return this.sfnClient.send(new StartExecutionCommand(input));
+    }
+
+    async sendMessage(
+        input: SendMessageCommandInput,
+    ): Promise<SendMessageCommandOutput> {
+        const response = await this.sqsClient?.send(new SendMessageCommand(input));
+        if (response == undefined) {
+            throw new Error(`Error sending message to queue ${input.QueueUrl} `);
+        }
+        return response;
+    }
 }

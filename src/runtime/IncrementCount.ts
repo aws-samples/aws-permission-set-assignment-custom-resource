@@ -15,86 +15,152 @@
  * SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
-import { DynamoDBClient, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
-import { SFNClient, StartExecutionCommand } from '@aws-sdk/client-sfn';
-import { Context, SQSBatchItemFailure, SQSBatchResponse, SQSEvent } from 'aws-lambda';
+import { Logger } from '@aws-lambda-powertools/logger';
+import { logMetrics, Metrics } from '@aws-lambda-powertools/metrics';
+import { captureLambdaHandler, Tracer } from '@aws-lambda-powertools/tracer';
+import middy from '@middy/core';
+import { Context, SQSBatchItemFailure, SQSBatchResponse, SQSEvent, SQSRecord } from 'aws-lambda';
+import { Aws, AwsApiCalls } from './Aws';
 
-const ddbClient = new DynamoDBClient({ logger: console });
-const sfnClient = new SFNClient({ logger: console });
 
+const logger = new Logger({
+    serviceName: 'IncrementCount',
+});
+const metrics = new Metrics({
+    namespace: process.env.METRIC_NAMESPACE!,
+    serviceName: 'IncrementCount',
+});
+const tracer = new Tracer({
+    serviceName: 'IncrementCount',
+    enabled: true,
+    captureHTTPsRequests: true,
+});
+const stepFunctionArn = process.env.STATE_MACHINE_ARN!;
 export const onEventHandler = async (
-  event: SQSEvent,
-  //@ts-ignore
-  _context: Context,
-  //@ts-ignore
-  _callback: Callback,
+    event: SQSEvent,
+    //@ts-ignore
+    _context: Context,
+    //@ts-ignore
+    _callback: Callback,
+    aws: AwsApiCalls = Aws.instance({}, tracer),
 ): Promise<SQSBatchResponse | undefined> => {
-  console.log(`Event: ${JSON.stringify(event)}`);
-  const failures: SQSBatchItemFailure[] = [];
+    logger.info(`Event: ${JSON.stringify(event)}`);
+    const failures: SQSBatchItemFailure[] = [];
 
-  if (event.Records == undefined) {
+    if (event.Records == undefined) {
+        logger.info('No records available');
+        return {
+            batchItemFailures: failures,
+        };
+    }
+
+
+    for (const record of event.Records) {
+
+        let failure = await incrementCounter(stepFunctionArn, record, aws);
+        if (failure != undefined) {
+            failures.push(failure);
+        } else {
+            logger.info(`Attempting to invoke state machine: ${stepFunctionArn}`);
+            const body = JSON.parse(record.body);
+            const sfnResponse = await aws.startExecution({
+                stateMachineArn: stepFunctionArn,
+                input: JSON.stringify(body),
+            });
+            logger.info(`Execution ARN: ${sfnResponse.executionArn} started ${sfnResponse.startDate}`);
+        }
+    }
+
     return {
-      batchItemFailures: failures,
+        batchItemFailures: failures,
     };
-  }
-  for (const record of event.Records) {
-    const body = JSON.parse(record.body);
-    const stepFunctionArn = process.env.STATE_MACHINE_ARN;
+};
 
-    if (stepFunctionArn != null) {
-      try {
-        await ddbClient.send(new UpdateItemCommand({
-          TableName: process.env.TABLE_NAME,
-          Key: {
-            pk: {
-              S: stepFunctionArn,
-            },
+async function insertCounter(stepFunctionArn: string, record: SQSRecord, aws: AwsApiCalls): Promise<SQSBatchItemFailure | undefined> {
+    try {
+        logger.info('Attempting to insert counter if not exists');
 
-          },
-          UpdateExpression: 'ADD #c :inc',
-          ExpressionAttributeNames: {
-            '#c': 'counter',
-          },
-          ExpressionAttributeValues: {
-            ':inc': {
-              N: '1',
-            },
-            ':MAX_CONCURRENCY': {
-              N: process.env.MAX_CONCURRENCY!,
-            },
-          },
-          ConditionExpression: '#c < :MAX_CONCURRENCY',
+        const ddbResponse = await aws.putItem({
+            TableName: process.env.TABLE_NAME,
+            Item: {
+                pk: {
+                    S: stepFunctionArn,
+                },
+                counter: {
+                    N: '0',
+                },
 
-        }));
-        const sfnResponse = await sfnClient.send(new StartExecutionCommand({
-          stateMachineArn: process.env.STATE_MACHINE_ARN,
-          input: JSON.stringify(body),
-          traceHeader: record.messageId,
-        }));
-        console.log(`Execution ARN: ${sfnResponse.executionArn} started ${sfnResponse.startDate}`);
-      } catch (e) {
+            },
+            ConditionExpression: 'attribute_not_exists(pk)',
+            ReturnValues: 'NONE',
+        });
+        logger.info(`Lock incremented: ${JSON.stringify(ddbResponse)}`);
+
+
+    } catch (e) {
         const error = e as Error;
-        console.error(`Error: ${error}`);
+
         if ('ConditionalCheckFailedException' == error.name) {
-          failures.push({
-            itemIdentifier: record.messageId,
-          });
+            logger.warn(`Counter for ${stepFunctionArn} already exists`);
+        } else {
+            logger.error(`Error: ${error}`);
+            return {
+                itemIdentifier: record.messageId,
+            };
+
         }
 
-      }
-    } else {
-      throw new Error('No step function arn provided');
     }
-  }
+    return undefined;
+}
 
-  return {
-    batchItemFailures: failures,
-  };
-};
-export const handler = async (event: SQSEvent, _context: Context): Promise<{ [name: string]: string | number | undefined }> => {
-  console.log(`"Event: ${JSON.stringify(event)}`);
+async function incrementCounter(stepFunctionArn: string, record: SQSRecord, aws: AwsApiCalls): Promise<SQSBatchItemFailure | undefined> {
+    let failure = await insertCounter(stepFunctionArn, record, aws);
+    if (failure != undefined) {
+        return failure;
+    }
+    try {
+        logger.info('Attempting to increment lock');
+
+        const ddbResponse = await aws.updateItem({
+            TableName: process.env.TABLE_NAME,
+            Key: {
+                pk: {
+                    S: stepFunctionArn,
+                },
+
+            },
+            UpdateExpression: 'ADD #c :inc',
+            ExpressionAttributeNames: {
+                '#c': 'counter',
+            },
+            ExpressionAttributeValues: {
+                ':inc': {
+                    N: '1',
+                },
+                ':MAX_CONCURRENCY': {
+                    N: process.env.MAX_CONCURRENCY!,
+                },
+            },
+            ConditionExpression: '#c < :MAX_CONCURRENCY',
+            ReturnValues: 'UPDATED_NEW',
+        });
+        logger.info(`Lock incremented: ${JSON.stringify(ddbResponse)}`);
 
 
-  return {};
+    } catch (e) {
+        const error = e as Error;
+        logger.error(`Error: ${error}`);
+        if ('ConditionalCheckFailedException' == error.name) {
+            return {
+                itemIdentifier: record.messageId,
+            };
+        }
 
-};
+    }
+    return undefined;
+}
+
+export const onEvent = middy(onEventHandler)
+    .use(captureLambdaHandler(tracer))
+    .use(logMetrics(metrics, { captureColdStartMetric: true }));

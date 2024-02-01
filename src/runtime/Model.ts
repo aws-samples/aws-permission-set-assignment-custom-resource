@@ -16,9 +16,12 @@
  * SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
-import { Account, OrganizationalUnit } from '@aws-sdk/client-organizations';
-import { CreateAccountAssignmentCommandInput, DeleteAccountAssignmentCommandInput } from '@aws-sdk/client-sso-admin';
-import { Callback } from 'aws-lambda';
+import { Account, OrganizationalUnit } from "@aws-sdk/client-organizations";
+import {
+  CreateAccountAssignmentCommandInput,
+  DeleteAccountAssignmentCommandInput,
+} from "@aws-sdk/client-sso-admin";
+import { Callback } from "aws-lambda";
 
 export interface PermissionSetAssignmentProperties {
   TargetOrganizationalUnitNames: string[] | undefined;
@@ -26,16 +29,14 @@ export interface PermissionSetAssignmentProperties {
   UserNames: string[] | undefined;
   PermissionSetNames: string[] | undefined;
   TargetAccountIds: string[] | undefined;
-
 }
 
-export type Target = OrganizationalUnit | Account
+export type Target = OrganizationalUnit | Account;
 
 export interface TargetOperation {
-  target:Target;
+  target: Target;
   type: AssignmentPayloadType;
 }
-
 
 export interface AccountAssignmentInputs {
   targetIds: string[];
@@ -43,11 +44,12 @@ export interface AccountAssignmentInputs {
   userIds: string[];
   permissionSetArns: string[];
 
-  targets:Target[];
-
+  targets: Target[];
 }
 
-export type AccountAssignmentCommandInputType = CreateAccountAssignmentCommandInput | DeleteAccountAssignmentCommandInput
+export type AccountAssignmentCommandInputType =
+  | CreateAccountAssignmentCommandInput
+  | DeleteAccountAssignmentCommandInput;
 
 export interface AccountAssignmentCommandInput {
   input: AccountAssignmentCommandInputType;
@@ -55,11 +57,9 @@ export interface AccountAssignmentCommandInput {
 }
 
 export enum AssignmentPayloadType {
-  CREATE = 'Create',
+  CREATE = "Create",
 
-  DELETE = 'Delete',
-
-
+  DELETE = "Delete",
 }
 
 export type AccountAssignmentsExecutionStatus = {
@@ -67,8 +67,11 @@ export type AccountAssignmentsExecutionStatus = {
   error?: string;
 
   cause?: string;
-}
+};
 
-
-//@ts-ignore
-export const defaultCallback: Callback<void> = (error?: Error | string | null, result?: void) => void {};
+export const defaultCallback: Callback<void> = (
+  //@ts-ignore
+  error?: Error | string | null,
+  //@ts-ignore
+  result?: void,
+) => void {};

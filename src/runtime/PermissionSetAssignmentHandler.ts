@@ -20,121 +20,157 @@ import { randomUUID } from 'crypto';
 import { Logger } from '@aws-lambda-powertools/logger';
 
 import { Callback, CdkCustomResourceEvent, CdkCustomResourceResponse, Context } from 'aws-lambda';
-import { Aws } from './aws';
-import { AccountAssignmentCommandInput, AssignmentPayloadType, defaultCallback, TargetOperation } from './model';
+import { Aws, AwsApiCalls } from './Aws';
+import { AccountAssignmentCommandInput, AssignmentPayloadType, defaultCallback, TargetOperation } from './Model';
 import { PermissionSetAssignmentPropertiesDiff } from './PermissionSetAssignmentPropertiesDiff';
+import { logMetrics, Metrics } from '@aws-lambda-powertools/metrics';
+import { captureLambdaHandler, Tracer } from '@aws-lambda-powertools/tracer';
+import middy from '@middy/core';
 
-const logger = new Logger({ serviceName: 'permissionSetAssignmentHandler' });
 
+const logger = new Logger({
+    serviceName: 'PermissionSetAssignmentHandler',
+});
+const metrics = new Metrics({
+    namespace: process.env.METRIC_NAMESPACE!,
+    serviceName: 'PermissionSetAssignmentHandler',
+});
+const tracer = new Tracer({
+    serviceName: 'PermissionSetAssignmentHandler',
+    enabled: true,
+    captureHTTPsRequests: true,
+});
 
-export const onEvent = async (event: CdkCustomResourceEvent,
-  // @ts-ignore
-  context: Context,
-  // @ts-ignore
-  callback: Callback = defaultCallback,
-  aws: Aws = new Aws()): Promise<CdkCustomResourceResponse> => {
-  logger.info(`Event: ${JSON.stringify(event, null, 2)}`);
+export const onEventHandler = async (
+    event: CdkCustomResourceEvent,
+    // @ts-ignore
+    context: Context,
+    // @ts-ignore
+    callback: Callback = defaultCallback,
+    aws: AwsApiCalls = Aws.instance({}, tracer),
+): Promise<CdkCustomResourceResponse> => {
+    logger.info(`Event: ${JSON.stringify(event, null, 2)}`);
 
-  let inputs: AccountAssignmentCommandInput[] = [];
-  let targets: TargetOperation[] = [];
-  let physicalResourceId: string;
+    let inputs: AccountAssignmentCommandInput[] = [];
+    let targets: TargetOperation[] = [];
+    let physicalResourceId: string;
 
-  switch (event.RequestType) {
+    switch (event.RequestType) {
     case 'Create':
-      physicalResourceId = randomUUID({});
+        physicalResourceId = randomUUID({});
 
-      [inputs, targets] = await aws.accountAssignmentCommandInputs(AssignmentPayloadType.CREATE, {
-        GroupNames: event.ResourceProperties.GroupNames,
-        PermissionSetNames: event.ResourceProperties.PermissionSetNames,
-        TargetAccountIds: event.ResourceProperties.TargetAccountIds,
-        UserNames: event.ResourceProperties.UserNames,
-        TargetOrganizationalUnitNames: event.ResourceProperties.TargetOrganizationalUnitNames,
-      });
-      break;
+        [inputs, targets] = await aws.accountAssignmentCommandInputs(
+            AssignmentPayloadType.CREATE,
+            {
+                GroupNames: event.ResourceProperties.GroupNames,
+                PermissionSetNames: event.ResourceProperties.PermissionSetNames,
+                TargetAccountIds: event.ResourceProperties.TargetAccountIds,
+                UserNames: event.ResourceProperties.UserNames,
+                TargetOrganizationalUnitNames:
+                event.ResourceProperties.TargetOrganizationalUnitNames,
+            },
+        );
+        break;
     case 'Delete':
+        physicalResourceId = event.PhysicalResourceId;
 
-      physicalResourceId = event.PhysicalResourceId;
-
-      [inputs, targets] = await aws.accountAssignmentCommandInputs(AssignmentPayloadType.DELETE, {
-        GroupNames: event.ResourceProperties.GroupNames,
-        PermissionSetNames: event.ResourceProperties.PermissionSetNames,
-        TargetAccountIds: event.ResourceProperties.TargetAccountIds,
-        UserNames: event.ResourceProperties.UserNames,
-        TargetOrganizationalUnitNames: event.ResourceProperties.TargetOrganizationalUnitNames,
-      });
-      break;
+        [inputs, targets] = await aws.accountAssignmentCommandInputs(
+            AssignmentPayloadType.DELETE,
+            {
+                GroupNames: event.ResourceProperties.GroupNames,
+                PermissionSetNames: event.ResourceProperties.PermissionSetNames,
+                TargetAccountIds: event.ResourceProperties.TargetAccountIds,
+                UserNames: event.ResourceProperties.UserNames,
+                TargetOrganizationalUnitNames:
+                event.ResourceProperties.TargetOrganizationalUnitNames,
+            },
+        );
+        break;
     case 'Update':
-      physicalResourceId = event.PhysicalResourceId;
+        physicalResourceId = event.PhysicalResourceId;
 
-      const diff: PermissionSetAssignmentPropertiesDiff = new PermissionSetAssignmentPropertiesDiff({
-        GroupNames: event.ResourceProperties.GroupNames,
-        PermissionSetNames: event.ResourceProperties.PermissionSetNames,
-        TargetAccountIds: event.ResourceProperties.TargetAccountIds,
-        UserNames: event.ResourceProperties.UserNames,
-        TargetOrganizationalUnitNames: event.ResourceProperties.TargetOrganizationalUnitNames,
-      }, {
-        GroupNames: event.OldResourceProperties.GroupNames,
-        PermissionSetNames: event.OldResourceProperties.PermissionSetNames,
-        TargetAccountIds: event.OldResourceProperties.TargetAccountIds,
-        UserNames: event.OldResourceProperties.UserNames,
-        TargetOrganizationalUnitNames: event.OldResourceProperties.TargetOrganizationalUnitNames,
-      });
+        const diff: PermissionSetAssignmentPropertiesDiff =
+            new PermissionSetAssignmentPropertiesDiff(
+                {
+                    GroupNames: event.ResourceProperties.GroupNames,
+                    PermissionSetNames: event.ResourceProperties.PermissionSetNames,
+                    TargetAccountIds: event.ResourceProperties.TargetAccountIds,
+                    UserNames: event.ResourceProperties.UserNames,
+                    TargetOrganizationalUnitNames:
+                    event.ResourceProperties.TargetOrganizationalUnitNames,
+                },
+                {
+                    GroupNames: event.OldResourceProperties.GroupNames,
+                    PermissionSetNames: event.OldResourceProperties.PermissionSetNames,
+                    TargetAccountIds: event.OldResourceProperties.TargetAccountIds,
+                    UserNames: event.OldResourceProperties.UserNames,
+                    TargetOrganizationalUnitNames:
+                    event.OldResourceProperties.TargetOrganizationalUnitNames,
+                },
+            );
 
-      if (!diff.isEmpty()) {
-        for (const add of diff.results.adds) {
-
-          const [i, t] = await aws.accountAssignmentCommandInputs(AssignmentPayloadType.CREATE, add);
-          inputs.push(...i);
-          targets.push(...t);
+        if (!diff.isEmpty()) {
+            for (const add of diff.results.adds) {
+                const [i, t] = await aws.accountAssignmentCommandInputs(
+                    AssignmentPayloadType.CREATE,
+                    add,
+                );
+                inputs.push(...i);
+                targets.push(...t);
+            }
+            for (const remove of diff.results.removes) {
+                const [i, t] = await aws.accountAssignmentCommandInputs(
+                    AssignmentPayloadType.DELETE,
+                    remove,
+                );
+                inputs.push(...i);
+                targets.push(...t);
+            }
+        } else {
+            logger.debug('No diff, so running inputs directly');
+            [inputs, targets] = await aws.accountAssignmentCommandInputs(
+                AssignmentPayloadType.CREATE,
+                {
+                    GroupNames: event.ResourceProperties.GroupNames,
+                    PermissionSetNames: event.ResourceProperties.PermissionSetNames,
+                    TargetAccountIds: event.ResourceProperties.TargetAccountIds,
+                    UserNames: event.ResourceProperties.UserNames,
+                    TargetOrganizationalUnitNames:
+                    event.ResourceProperties.TargetOrganizationalUnitNames,
+                },
+            );
         }
-        for (const remove of diff.results.removes) {
 
-          const [i, t] = await aws.accountAssignmentCommandInputs(AssignmentPayloadType.DELETE, remove);
-          inputs.push(...i);
-          targets.push(...t);
-        }
-      } else {
-        logger.debug('No diff, so running inputs directly');
-        [inputs, targets] = await aws.accountAssignmentCommandInputs(AssignmentPayloadType.CREATE, {
-          GroupNames: event.ResourceProperties.GroupNames,
-          PermissionSetNames: event.ResourceProperties.PermissionSetNames,
-          TargetAccountIds: event.ResourceProperties.TargetAccountIds,
-          UserNames: event.ResourceProperties.UserNames,
-          TargetOrganizationalUnitNames: event.ResourceProperties.TargetOrganizationalUnitNames,
-        });
-      }
+        break;
+    }
+    let response: CdkCustomResourceResponse;
+    try {
+        await aws.startAccountAssignmentsExecutions(process.env.QUEUE_URL!, inputs);
 
-      break;
-  }
-  let response: CdkCustomResourceResponse;
-  try {
+        await aws.associateTargetsToStack(process.env.TABLE_NAME!,event.StackId, targets);
 
-    await aws.startAccountAssignmentsExecutions(process.env.QUEUE_URL!, inputs);
-
-    await aws.associateTargetsToStack(event.StackId, targets);
-
-    response = {
-      PhysicalResourceId: physicalResourceId,
-      IsComplete: false,
-      RequestType: event.RequestType,
-    };
-
-  } catch (e) {
-    const error = e as Error;
-    logger.error(`${error.name} - ${error.message}`);
-    response = {
-      PhysicalResourceId: physicalResourceId,
-      RequestType: event.RequestType,
-      IsComplete: true,
-      Data: {
-        error: error,
-      },
-      Failed: true,
-    };
-
-  }
-  logger.info(`Response: ${JSON.stringify(response, null, 2)}`);
-  return response;
-
+        response = {
+            PhysicalResourceId: physicalResourceId,
+            IsComplete: false,
+            RequestType: event.RequestType,
+        };
+    } catch (e) {
+        const error = e as Error;
+        logger.error(`${error.name} - ${error.message}`);
+        response = {
+            PhysicalResourceId: physicalResourceId,
+            RequestType: event.RequestType,
+            IsComplete: true,
+            Data: {
+                error: error,
+            },
+            Failed: true,
+        };
+    }
+    logger.info(`Response: ${JSON.stringify(response, null, 2)}`);
+    return response;
 };
 
+export const onEvent = middy(onEventHandler)
+    .use(captureLambdaHandler(tracer))
+    .use(logMetrics(metrics, { captureColdStartMetric: true }));

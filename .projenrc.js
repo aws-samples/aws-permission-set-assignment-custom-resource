@@ -25,6 +25,8 @@ const project = new awscdk.AwsCdkTypeScriptApp({
   defaultReleaseBranch: 'main',
   name: 'aws-cfct-permission-set-assignment-custom-resource',
   deps: ['aws-lambda',
+    '@middy/core',
+    '@aws-sdk/client-sqs',
     '@aws-lambda-powertools/tracer',
     '@aws-lambda-powertools/metrics',
     '@aws-lambda-powertools/logger',
@@ -38,7 +40,7 @@ const project = new awscdk.AwsCdkTypeScriptApp({
     '@aws-sdk/client-cloudformation',
     'cdk-nag'],
   devDeps: ['eslint-plugin-jest', '@types/aws-lambda', 'aws-sdk-client-mock'],
-  appEntrypoint: 'infrastructure.ts',
+  appEntrypoint: 'infrastructure/main.ts',
   packageManager: NodePackageManager.NPM,
   gitignore: ['.DS_Store', '.idea/', '*.bkp', '*.dtmp', 'repolinter.results.txt', '*.output*', '*_report_result.txt',
     'examples/python-usage/.venv', 'examples/python-usage/node_modules', 'examples/python-usage/dist', 'examples/python-usage/cdk.out',
@@ -51,9 +53,17 @@ const project = new awscdk.AwsCdkTypeScriptApp({
   license: 'MIT-0',
   copyrightOwner: 'Amazon.com, Inc. or its affiliates. All Rights Reserved.',
   release: true,
-  eslint: true,
+  projenrcTs: true,
   eslintOptions: {
-    prettier: false,
+    prettier: true,
+    dirs: ['src/runtime'],
+    devdirs: ['test', 'src/infrastructure'],
+    ignorePatterns: ['src/main.ts'],
+  },
+  prettierOptions: {
+    settings: {
+      printWidth: 120,
+    },
   },
   releaseTrigger: ReleaseTrigger.manual(),
   context: {
@@ -67,33 +77,9 @@ const project = new awscdk.AwsCdkTypeScriptApp({
   // devDeps: [],             /* Build dependencies for this module. */
   // packageName: undefined,  /* The "name" in package.json. */
 });
-project.eslint.addPlugins('jest');
-project.eslint.rules.quotes = ['error', 'single', { avoidEscape: true }];
-// Style
-project.eslint.rules.quotes = ['error', 'single', { avoidEscape: true }];
-project.eslint.rules['comma-dangle'] = ['error', 'always-multiline']; // ensures clean diffs, see https://medium.com/@nikgraf/why-you-should-enforce-dangling-commas-for-multiline-statements-d034c98e36f8
-project.eslint.rules['comma-spacing'] = ['error', {
-  before: false,
-  after: true,
-}]; // space after, no space before
-project.eslint.rules['no-multi-spaces'] = ['error', { ignoreEOLComments: false }]; // no multi spaces
-project.eslint.rules['array-bracket-spacing'] = ['error', 'never']; // [1, 2, 3]
-project.eslint.rules['array-bracket-newline'] = ['error', 'consistent']; // enforce consistent line breaks between brackets
-project.eslint.rules['object-curly-spacing'] = ['error', 'always']; // { key: 'value' }
-project.eslint.rules['object-curly-newline'] = ['error', {
-  multiline: true,
-  consistent: true,
-}]; // enforce consistent line breaks between braces
-project.eslint.rules['object-property-newline'] = ['error', { allowAllPropertiesOnSameLine: true }]; // enforce "same line" or "multiple line" on object properties
-project.eslint.rules['keyword-spacing'] = ['error']; // require a space before & after keywords
-project.eslint.rules['brace-style'] = ['error', '1tbs', { allowSingleLine: true }]; // enforce one true brace style
-project.eslint.rules['space-before-blocks'] = 'error'; // require space before blocks
-project.eslint.rules.curly = ['error', 'multi-line', 'consistent']; // require curly braces for multiline control statements
-project.eslint.rules['max-len'] = ['error', {
-  code: 150,
-  ignoreComments: true,
-  ignoreUrls: true,
-  ignoreRegExpLiterals: true,
-}];
-project.eslint.rules['no-var'] = ['error'];
+
+
+project.tasks.tryFind('synth').reset('cdk synth', {
+  receiveArgs: true,
+});
 project.synth();

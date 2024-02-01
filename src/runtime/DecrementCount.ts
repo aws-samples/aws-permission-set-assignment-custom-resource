@@ -15,68 +15,98 @@
  * SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
-import { DynamoDBClient, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
-import { SendMessageCommand, SQSClient } from '@aws-sdk/client-sqs';
+import { Logger } from '@aws-lambda-powertools/logger';
+import { logMetrics, Metrics } from '@aws-lambda-powertools/metrics';
+import { captureLambdaHandler, Tracer } from '@aws-lambda-powertools/tracer';
+
+import middy from '@middy/core';
 import { Context, SNSEvent } from 'aws-lambda';
+import { Aws, AwsApiCalls } from './Aws';
 
-const ddbClient = new DynamoDBClient({ logger: console });
-const sqsClient = new SQSClient({ logger: console });
-export const handler = async (event: SNSEvent, _context: Context): Promise<{ [name: string]: string | number | undefined }> => {
-  console.log(`"Event: ${JSON.stringify(event)}`);
-  for (const record of event.Records) {
+const logger = new Logger({
+    serviceName: 'DecrementCount',
+});
+const metrics = new Metrics({
+    namespace: process.env.METRIC_NAMESPACE!,
+    serviceName: 'DecrementCount',
+});
+const tracer = new Tracer({
+    serviceName: 'DecrementCount',
+    enabled: true,
+    captureHTTPsRequests: true,
+});
 
-    const body = JSON.parse(record.Sns.Message);
-    const status = body.status as string;
-    const stepFunctionArn = process.env.STATE_MACHINE_ARN;
-    if (stepFunctionArn != null) {
-      try {
-        await ddbClient.send(new UpdateItemCommand({
-          TableName: process.env.TABLE_NAME,
-          Key: {
-            pk: {
-              S: stepFunctionArn,
-            },
+export const onEventHandler = async (
+    event: SNSEvent,
+    //@ts-ignore
+    _context: Context,
+    //@ts-ignore
+    _callback: Callback,
+    aws: AwsApiCalls = Aws.instance({}, tracer),
+): Promise<{ [name: string]: string | number | undefined }> => {
+    logger.info(`"Event: ${JSON.stringify(event)}`);
+    for (const record of event.Records) {
+        const body = JSON.parse(record.Sns.Message);
+        const status = body.status as string;
+        const stepFunctionArn = process.env.STATE_MACHINE_ARN;
+        if (stepFunctionArn != null) {
+            try {
+                await aws.updateItem({
+                    TableName: process.env.TABLE_NAME,
+                    Key: {
+                        pk: {
+                            S: stepFunctionArn,
+                        },
+                    },
+                    UpdateExpression: 'ADD #c :inc',
+                    ExpressionAttributeNames: {
+                        '#c': 'counter',
+                    },
+                    ExpressionAttributeValues: {
+                        ':inc': {
+                            N: '-1',
+                        },
+                        ':ONE': {
+                            N: '1',
+                        },
+                    },
+                    ConditionExpression: '#c >= :ONE',
+                });
+                if ('SUCCEEDED' != status ) {
+                    try {
+                        if('true' == process.env.REQUEUE_ON_FAILURE) {
+                            await aws.sendMessage(
+                                {
+                                    QueueUrl: process.env.QUEUE_URL,
+                                    MessageBody: JSON.stringify(body),
+                                    MessageGroupId: 'PermissionSetAssignmentProvider',
+                                });
+                        }else{
+                            await aws.sendMessage(
+                                {
+                                    QueueUrl: process.env.DLQ_URL,
+                                    MessageBody: JSON.stringify(body),
+                                    MessageGroupId: 'PermissionSetAssignmentProvider',
+                                });
+                        }
 
-          },
-          UpdateExpression: 'ADD #c :inc',
-          ExpressionAttributeNames: {
-            '#c': 'counter',
-          },
-          ExpressionAttributeValues: {
-            ':inc': {
-              N: '-1',
-            },
-            ':ONE': {
-              N: '1',
-            },
-          },
-          ConditionExpression: '#c >= :ONE',
-
-        }));
-        if ('SUCCEEDED' != status && 'true' == process.env.REQUEUE_ON_FAILURE) {
-          try {
-            await sqsClient.send(new SendMessageCommand({
-              DelaySeconds: Math.floor(Math.random() * (120 - 15 + 1) + 15),
-              QueueUrl: process.env.QUEUE_URL,
-              MessageBody: JSON.stringify(body),
-              MessageGroupId: 'PermisssionSetAssignmentProvider',
-            }));
-          } catch (e1) {
-            const error1 = e1 as Error;
-            console.error(`Error returning message to queue : ${error1}`);
-          }
+                    } catch (e1) {
+                        const error1 = e1 as Error;
+                        logger.error(`Error returning message to queue : ${error1}`);
+                    }
+                }
+            } catch (e) {
+                const error = e as Error;
+                logger.error(`Error: ${error}`);
+            }
+        } else {
+            throw new Error('No step function arn provided');
         }
-      } catch (e) {
-        const error = e as Error;
-        console.error(`Error: ${error}`);
-
-      }
-    } else {
-      throw new Error('No step function arn provided');
     }
-  }
 
-
-  return {};
-
+    return {};
 };
+
+export const onEvent = middy(onEventHandler)
+    .use(captureLambdaHandler(tracer))
+    .use(logMetrics(metrics, { captureColdStartMetric: true }));

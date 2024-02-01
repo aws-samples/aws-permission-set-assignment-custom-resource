@@ -21,10 +21,10 @@ import { AttributeType, ITable, Table } from 'aws-cdk-lib/aws-dynamodb';
 import { IEventBus, Rule, RuleTargetInput } from 'aws-cdk-lib/aws-events';
 import { SnsTopic } from 'aws-cdk-lib/aws-events-targets';
 import { AnyPrincipal, Effect, PolicyStatement } from 'aws-cdk-lib/aws-iam';
-import { Runtime } from 'aws-cdk-lib/aws-lambda';
+import { Runtime, Tracing } from 'aws-cdk-lib/aws-lambda';
 import { SnsEventSource, SqsEventSource } from 'aws-cdk-lib/aws-lambda-event-sources';
 import { NodejsFunction } from 'aws-cdk-lib/aws-lambda-nodejs';
-import { RetentionDays } from 'aws-cdk-lib/aws-logs';
+import { LogGroup, RetentionDays } from 'aws-cdk-lib/aws-logs';
 import { ITopic, Topic } from 'aws-cdk-lib/aws-sns';
 import { FifoThroughputLimit, IQueue, Queue } from 'aws-cdk-lib/aws-sqs';
 import { IStateMachine } from 'aws-cdk-lib/aws-stepfunctions';
@@ -75,54 +75,62 @@ export class AwsStateMachineWithConcurrencyControls extends Construct {
       });
     }
     this.table = props.concurrencyTable;
-
-    const incrementCount = new NodejsFunction(this, 'increment-count-function', {
+    const incrementCountFunctionLogGroup = new LogGroup(this, 'IncrementCountFunctionLogGroup', {
+      retention: RetentionDays.ONE_DAY,
+    });
+    const incrementCount = new NodejsFunction(this, 'IncrementCountFunction', {
       description: 'StateMachineConcurrencyControl increment-count-function',
       memorySize: 256,
       timeout: Duration.seconds(functionTimeoutSeconds),
       runtime: Runtime.NODEJS_LATEST,
-      handler: 'handler',
-      entry: path.join(__dirname, 'IncrementCount.ts'),
-      logRetention: RetentionDays.ONE_MONTH,
+      handler: 'index.onEvent',
+      entry: path.join(__dirname, '..', '..', 'runtime', 'IncrementCount.ts'),
+      logGroup: incrementCountFunctionLogGroup,
 
       environment: {
         TABLE_NAME: this.table.tableName,
         STATE_MACHINE_ARN: props.stateMachine.stateMachineArn,
         MAX_CONCURRENCY: `${props.maxConcurrentExecutions}`,
         QUEUE_URL: this.queue.queueUrl,
+        LOG_LEVEL: 'DEBUG',
       },
       events: [
         new SqsEventSource(this.queue, {
           enabled: true,
-          batchSize: 10,
+          batchSize: 1,
           reportBatchItemFailures: true,
-          maxConcurrency: 2,
         }),
       ],
       reservedConcurrentExecutions: 1,
-
+      tracing: Tracing.ACTIVE,
 
     });
     props.stateMachine.grantStartExecution(incrementCount);
-    const decrementCount = new NodejsFunction(this, 'decrement-count-function', {
+    const decrementCountFunctionLogGroup = new LogGroup(this, 'DecrementCountFunctionLogGroup', {
+      retention: RetentionDays.ONE_DAY,
+    });
+
+    const decrementCount = new NodejsFunction(this, 'DecrementCountFunction', {
       description: 'StateMachineConcurrencyControl decrement-count-function',
       memorySize: 256,
       timeout: Duration.seconds(functionTimeoutSeconds),
       runtime: Runtime.NODEJS_LATEST,
-      handler: 'handler',
-      entry: path.join(__dirname, 'DecrementCount.ts'),
-      logRetention: RetentionDays.ONE_MONTH,
+      handler: 'index.onEvent',
+      entry: path.join(__dirname, '..', '..', 'runtime', 'DecrementCount.ts'),
+      logGroup: decrementCountFunctionLogGroup,
 
       environment: {
         TABLE_NAME: this.table.tableName,
         STATE_MACHINE_ARN: props.stateMachine.stateMachineArn,
         REQUEUE_ON_FAILURE: `${props.requeueOnFailure}`,
         QUEUE_URL: this.queue.queueUrl,
+        DLQ_URL: this.dql.queueUrl,
+        LOG_LEVEL: 'DEBUG',
       },
-
       reservedConcurrentExecutions: 1,
 
     });
+    this.dql.grantSendMessages(decrementCount);
     this.queue.grantSendMessages(decrementCount);
     this.queue.grantSendMessages(incrementCount);
     this.table.grantReadWriteData(decrementCount);
@@ -145,10 +153,9 @@ export class AwsStateMachineWithConcurrencyControls extends Construct {
         source: ['aws.states'],
         detailType: ['Step Functions Execution Status Change'],
         detail: {
-          status: ['ABORTED', 'TIMED_OUT', 'SUCCEEDED', 'FAILED'],
+          status: ["SUCCEEDED", "FAILED", "TIMED_OUT", "ABORTED"],
           stateMachineArn: [props.stateMachine.stateMachineArn],
         },
-
       },
       targets: [new SnsTopic(this.topic, {
         message: RuleTargetInput.fromEventPath('$.detail'),

@@ -1,7 +1,7 @@
 {
   "permissionSetAssignments": [
     {
-      "Id": "psa1",
+      "Id": "psa3",
       "Description": "This is a test1 team permission set assignment.",
       "GroupNames": [
         "TestGroup01",
@@ -15,33 +15,15 @@
       "AccountIds": null,
       "PermissionSets": [
         "ps1",
-        "ps3"
+        "ps3",
+        "ps4"
       ]
     },
     {
-      "Id": "psa2",
+      "Id": "psa1",
       "Description": "This is a test2 team permission set assignment.",
       "GroupNames": [
-        "TestGroup01",
-        "TestGroup03"
-      ],
-      "UserNames": null,
-      "OrganizationalUnits": [
-        "Sandbox",
-        "Infrastructure"
-      ],
-      "AccountIds": null,
-      "PermissionSets": [
-        "ps2",
-        "ps3"
-      ]
-    },
-    {
-      "Id": "psa4",
-      "Description": "This is a test3 team permission set assignment.",
-      "GroupNames": [
-
-        "TestGroup03"
+        "TestGroup01"
       ],
       "UserNames": null,
       "OrganizationalUnits": [
@@ -49,25 +31,7 @@
       ],
       "AccountIds": null,
       "PermissionSets": [
-
-        "ps4"
-      ]
-    },
-    {
-      "Id": "psa5",
-      "Description": "This is a test4 team permission set assignment.",
-      "GroupNames": [
-        "Cloud-Engineering",
-        "Cloud-Services"
-      ],
-      "UserNames": null,
-      "OrganizationalUnits":null,
-      "AccountIds": [
-        "200982613275"
-      ],
-      "PermissionSets": [
-
-        "adminaccess"
+        "ps1"
       ]
     }
   ]
